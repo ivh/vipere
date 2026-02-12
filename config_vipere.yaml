@@ -1,0 +1,17 @@
+inst: CRIRES
+chunks: 1
+deg_bkg: 1
+deg_norm: 2
+deg_wave: 2
+ip: g
+iphs: 50
+kapsig: "15 6"
+kapsig_cptl: 0.6
+oset: "7:17"
+oversampling: 1
+rv_guess: 1
+tag: tmp
+telluric: add
+tsig: 1
+vcut: 100
+wgt: 0

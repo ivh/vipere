@@ -4,6 +4,7 @@
 # dependencies = [
 #   "astropy",
 #   "numpy",
+#   "pyyaml",
 #   "scipy",
 # ]
 # ///
@@ -14,7 +15,6 @@
 ## Original authors: Mathias Zechmeister and Jana Koehler
 
 import argparse
-import configparser
 import glob
 import os
 import subprocess
@@ -888,31 +888,21 @@ if __name__ == "__main__" or __name__ == "vipere":
     preparser = argparse.ArgumentParser(add_help=False)
     preparser.add_argument('args', nargs='*')
     preparser.add_argument('-inst', help='Instrument.', default='CRIRES', choices=insts)
-    preparser.add_argument('-config_file', help='Config file and optional section  [None DEFAULT].', nargs='*', type=str)
+    preparser.add_argument('-config_file', help='YAML config file to override defaults.', type=str)
     preargs = preparser.parse_known_args()[0]
 
     Tell = None
     iset = slice(None)
 
-    # read in default values from config_vipere.ini
-    configs_inst, configs_user = {}, {}
-    config_default = configparser.ConfigParser()
-    config_default.read(viperdir+'config_vipere.ini')
-    configs_def = dict(config_default['DEFAULT'])
-    if preargs.inst in config_default.sections():
-        configs_inst = dict(config_default[preargs.inst])
+    # read in default values from config_vipere.yaml
+    import yaml
+    with open(viperdir+'config_vipere.yaml') as f:
+        configs_def = {k: str(v) for k, v in yaml.safe_load(f).items()}
 
+    configs_user = {}
     if preargs.config_file:
-        if len(preargs.config_file) == 1 and not preargs.config_file[0].endswith('.ini'):
-            if preargs.config_file[0] in config_default.sections():
-                configs_user = dict(config_default[preargs.config_file[0]])
-        elif len(preargs.config_file) == 2:
-            config = configparser.ConfigParser()
-            config.read(preargs.config_file[0])
-            if preargs.config_file[1] in config.sections():
-                configs_user = dict(config[preargs.config_file[1]])
-            else:
-                print('WARNING: Declared section is not found in %s. Use DEFAULT values instead.' % preargs.config_file[0])
+        with open(preargs.config_file[0]) as f:
+            configs_user = {k: str(v) for k, v in yaml.safe_load(f).items()}
 
     parser = argparse.ArgumentParser(description='vipere - Telluric correction for CRIRES+ spectra', add_help=False, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     argopt = parser.add_argument
@@ -922,7 +912,7 @@ if __name__ == "__main__" or __name__ == "vipere":
     argopt('-fts', help='Filename of FTS Cell.', default=viperdir + fts_default, dest='ftsname', type=str)
     argopt('-ip', help='IP model (g: Gaussian, ag: asymmetric (skewed) Gaussian, sg: super Gaussian, bg: biGaussian, mg: multiple Gaussians, mcg: multiple central Gaussians, bnd: bandmatrix).', default='g', choices=[*IPs], type=str)
     argopt('-chunks', nargs='?', help='Divide one order into a number of chunks.', default=1, type=int)
-    argopt('-config_file', nargs='*', help='Config file and optional section  [None DEFAULT].', type=str)
+    argopt('-config_file', help='YAML config file to override defaults.', type=str)
     argopt('-createtpl', nargs='?', help='Removal of telluric features (or cell lines) and combination of several observations.', default=False, const=True, type=int)
     argopt('-deg_bkg', nargs='?', help='Number of additional parameters.', default=0, const=1, type=int)
     argopt('-deg_norm', nargs='?', help='Polynomial degree for flux normalisation.', default=3, type=int)
@@ -955,7 +945,6 @@ if __name__ == "__main__" or __name__ == "vipere":
     argopt('-?', '-h', '-help', '--help', help='Show this help message and exit.', action='help')
 
     parser.set_defaults(**configs_def)
-    parser.set_defaults(**configs_inst)
     parser.set_defaults(**configs_user)
 
     parser.set_defaults(kapsig = [float(i) for i in (argopt('--kapsig').default.split(' '))])
