@@ -889,7 +889,7 @@ def fit_chunk(order, chunk, obsname):
         par.ip += [par.ip[-1]]
     parguess.ip = par.ip
 
-    sig = 1 * err_obs if (wgt in 'error') else np.ones_like(spec_obs)
+    sig = 1 * err_obs if (wgt == 'error') else np.ones_like(spec_obs)
     if telluric in ('add', 'add2'):
         sig[mskatm(wave_obs) < 0.1] = tsig
 
@@ -940,7 +940,7 @@ def fit_chunk(order, chunk, obsname):
             wave_obs_ok = wave_obs[i_ok]
             spec_obs_ok = spec_obs[i_ok]
 
-        if wgt in 'tell':
+        if wgt == 'tell':
             atm_ok = np.array([0 if (d.unc>20 or d.unc==0) else 1 for d in par.atm])
             atm_ok[np.array(par.atm)<0.2] = 0
 
@@ -949,7 +949,7 @@ def fit_chunk(order, chunk, obsname):
                 sig /= np.nanmedian(sig[i_ok])
                 sig[spec_obs/np.nanmedian(spec_obs[i_ok])<0.1] = 2
 
-        if (nr_k1 != nr_k2) or ('tell' in wgt):
+        if (nr_k1 != nr_k2) or (wgt == 'tell'):
             par5, e_params = S_mod.fit(pixel_ok, spec_obs_ok, par3, dx=0.1*show, sig=sig[i_ok], res=(not createtpl)*show, rel_fac=createtpl*show)
             par = par5
 
@@ -962,10 +962,11 @@ def fit_chunk(order, chunk, obsname):
         gas_model[iset] = S_mod(pixel[iset], **par)
         gas_model /= np.nanmedian(gas_model[iset])
 
+        bad = (gas_model < 0.2) | np.isnan(gas_model)
+        gas_model[bad] = np.nan
         spec_cor = spec_obs / gas_model
         err_cor = err_obs / gas_model
 
-        spec_cor[gas_model<0.2] = np.nan
         spec_cor[spec_cor<0.01] = np.nan
 
         if tpl_wave in ('initial', 'berv'):
@@ -1177,11 +1178,13 @@ if createtpl:
         if len(spec_t) > 1:
             for nn in range(1, len(spec_t)):
                 valid = np.isfinite(spec_t[nn])
-                spec_cubic = CubicSpline(wave_t[nn][valid], spec_t[nn][valid])(wave_t[0])
-                spec_cubic[valid==0] = np.nan
+                wave_valid = wave_t[nn][valid]
+                spec_cubic = CubicSpline(wave_valid, spec_t[nn][valid])(wave_t[0])
+                out_of_range = (wave_t[0] < wave_valid[0]) | (wave_t[0] > wave_valid[-1])
+                spec_cubic[out_of_range] = np.nan
                 spec_t[nn] = spec_cubic
-                weight_t[nn] = np.interp(wave_t[0], wave_t[nn][valid], weight_t[nn][valid])
-                weight_t[nn][valid==0] = np.nan
+                weight_t[nn] = np.interp(wave_t[0], wave_valid, weight_t[nn][valid])
+                weight_t[nn][out_of_range] = np.nan
                 weight_t[nn][weight_t[nn]==0] = np.nan
 
             if kapsig_ctpl:
