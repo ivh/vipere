@@ -11,9 +11,6 @@ from astropy.coordinates import SkyCoord, EarthLocation
 import astropy.units as u
 from astropy.constants import c
 
-from .readmultispec import readmultispec
-from .airtovac import airtovac
-
 from .FTS_resample import resample, FTSfits
 
 try:

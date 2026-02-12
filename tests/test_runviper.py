@@ -7,18 +7,19 @@ import importlib
 import numpy as np
 import os
 import subprocess
-from cpl.core import Table
 
 path = os.getcwd()
-directory = os.path.dirname(os.path.realpath(__file__)) + os.sep 
+directory = os.path.dirname(os.path.realpath(__file__)) + os.sep
 
 Inst = importlib.import_module('inst.inst_CRIRES')
 Tpl = Inst.Tpl
 
 try:
     # remove existing files from last test run
-    os.remove(directory + "tmp_rvo_par.fits")
-    os.remove(directory + "tmp1_rvo_par.fits")
+    os.remove(directory + "tmp.rvo.dat")
+    os.remove(directory + "tmp.par.dat")
+    os.remove(directory + "tmp1.rvo.dat")
+    os.remove(directory + "tmp1.par.dat")
     os.remove(directory + "tmp_tpl.fits")
 except:
     pass
@@ -40,7 +41,7 @@ class test_viper(unittest.TestCase):
         # Test run to create a telluric free template out of several observations
         # for testing just two orders and two observations were used
 
-        os.system("python3 -m viper " + directory + "'test_data/22*' -inst CRIRES -deg_norm 0 -deg_wave 2 -deg_bkg 1 -oversampling 1 -createtpl -telluric add -tsig 10 -nocell -nset :2 -oset 7,12 -output_format cpl -tag " + directory + "tmp")
+        os.system("python3 -m viper " + directory + "'test_data/22*' -inst CRIRES -deg_norm 0 -deg_wave 2 -deg_bkg 1 -oversampling 1 -createtpl -telluric add -tsig 10 -nocell -nset :2 -oset 7,12 -tag " + directory + "tmp")
 
         # test if template was generated
         assert os.path.exists(directory + "tmp_tpl.fits")
@@ -60,18 +61,21 @@ class test_viper(unittest.TestCase):
         # Calculte RVs with test template
         # just two orders of two observations for fast test
 
-        os.system("python3 -m viper " + directory + "'test_data/SGC*' " + directory + "test_compare/test_tpl.fits -inst CRIRES -deg_norm 2 -deg_wave 2 -deg_bkg 1 -tsig 1 -telluric add -tellshift -kapsig 0 4.5 -oversampling 1 -nset :2 -oset 7,12 -output_format cpl -tag " + directory + "tmp1")
+        os.system("python3 -m viper " + directory + "'test_data/SGC*' " + directory + "test_compare/test_tpl.fits -inst CRIRES -deg_norm 2 -deg_wave 2 -deg_bkg 1 -tsig 1 -telluric add -tellshift -kapsig 0 4.5 -oversampling 1 -nset :2 -oset 7,12 -tag " + directory + "tmp1")
 
         # test if all products were generated
-        assert os.path.exists(directory+"tmp1_rvo_par.fits")
+        assert os.path.exists(directory+"tmp1.rvo.dat")
 
-        # test reults; comparison to pre-generated RV results
+        # test results; comparison to pre-generated RV results
+        # read reference values from the cpl fits file
+        from cpl.core import Table
         tbl = Table.load(directory+"test_compare/test_rvo_par.fits", 1)
         print('----',  np.array(tbl["BJD"])[0])
         bjd, RV, e_RV = np.array(tbl["BJD"])[0], np.array(tbl["RV"])[0], np.array(tbl["e_RV"])[0]
 
-        tbl = Table.load(directory+"tmp1_rvo_par.fits", 1)
-        bjd2, RV2, e_RV2 = np.array(tbl["BJD"])[0], np.array(tbl["RV"])[0], np.array(tbl["e_RV"])[0]
+        # read new results from dat file
+        data = np.genfromtxt(directory+"tmp1.rvo.dat", names=True)
+        bjd2, RV2, e_RV2 = data["BJD"][0], data["RV"][0], data["e_RV"][0]
 
         assert np.isclose(bjd, bjd2, rtol=1e-5, atol=0)
         assert np.isclose(RV, RV2, rtol=1e-1, atol=0)

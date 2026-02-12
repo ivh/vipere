@@ -22,24 +22,16 @@ from utils.gplot import *
 gplot.colors('classic')
 gplot2 = Gplot()
 from utils.param import Params
-from utils.pause import pause
 
 from utils.model import model, model_bnd, IPs, show_model, pade
-from utils.targ import Targ
-import utils.convert_output as convert_output
-try:
-    import viper.vpr as vpr
-except: 
-    import vpr
 
 
 viperdir = os.path.dirname(os.path.realpath(__file__)) + os.sep
 
 c = 299792.458   # [km/s] speed of light
 
-targ = None
 modset = {}   # model setting parameters
-insts = [os.path.basename(i)[5:-3] for i in glob.glob(viperdir+'inst/inst_*.py')]
+insts = ['CRIRES']
 
 class nameddict(dict):
     """
@@ -126,7 +118,6 @@ def SSRstat(vgrid, SSR, dk=1, plot='maybe', N=None):
         gplot2.yrange('[*:%f]' % np.max(SSR))
         gplot2(vgrid, SSR-SSR[k], " w lp, vk="+str(vgrid[k])+", %f+(x-vk)*%f+(x-vk)**2*%f," % tuple(a), [v,v], [0,SSR[1]], 'w l t "%f km/s"'%v)
         gplot2+(vpeak, SSRpeak, ' lt 1 pt 6; set yrange [*:*]')
-        pause(v)
     return v, e_v, a
 
     
@@ -137,7 +128,7 @@ if __name__ == "__main__" or __name__ == "viper.viper":
     # check first the instrument with preparsing
     preparser = argparse.ArgumentParser(add_help=False)
     preparser.add_argument('args', nargs='*')
-    preparser.add_argument('-inst', help='Instrument.', default='TLS', choices=insts)
+    preparser.add_argument('-inst', help='Instrument.', default='CRIRES', choices=insts)
     preparser.add_argument('-config_file', help='Config file and optional section  [None DEFAULT].', nargs='*', type=str)
     preargs = preparser.parse_known_args()[0]
     
@@ -175,7 +166,7 @@ if __name__ == "__main__" or __name__ == "viper.viper":
     argopt = parser.add_argument   # function short cut
     argopt('obspath', help='Filename of observation.', default='data/TLS/betgem/BETA_GEM.fits', type=str)
     argopt('tplname', help='Filename of template.', nargs='?', type=str)
-    argopt('-inst', help='Instrument.', default='TLS', choices=insts)
+    argopt('-inst', help='Instrument.', default='CRIRES', choices=insts)
     argopt('-fts', help='Filename of FTS Cell.', default=viperdir + FTS.__defaults__[0], dest='ftsname', type=str)
     argopt('-ip', help='IP model (g: Gaussian, ag: asymmetric (skewed) Gaussian, sg: super Gaussian, bg: biGaussian, mg: multiple Gaussians, mcg: multiple central Gaussians, bnd: bandmatrix).', default='g', choices=[*IPs], type=str)
     argopt('-chunks', nargs='?', help='Divide one order into a number of chunks.', default=1, type=int)
@@ -185,10 +176,8 @@ if __name__ == "__main__" or __name__ == "viper.viper":
     argopt('-deg_norm', nargs='?', help='Polynomial degree for flux normalisation.', default=3, type=int)
     argopt('-deg_norm_rat', nargs='?', help='Rational polynomial degree of denominator for flux normalisation.', type=int)
     argopt('-deg_wave', nargs='?', help='Polynomial degree for wavelength scale l(x).', default=3, type=int)
-    argopt('-demo', nargs='?', help='Demo plots. Use -8 to skip plots 1,2,4).', default=0, const=-1, type=int)
     argopt('-fix', nargs='*', help='Fix parameter. -fix wave will fix wavelength, as needed for stabilized instruments (like TRES, HARPS).', default=['None'], type=str)
     argopt('-flagfile', help='Use just good region as defined in flag file.', default='', type=str)
-    argopt('-infoprec', help='Prints and plots information about precision estimates for the star and the iodine.', action='store_true')
     argopt('-iphs', nargs='?', help='Half size of the IP.', default=50, type=int)
     argopt('-ipB', nargs='*', help='Factor of IP width varation.', type=float, default=[])
     argopt('-iset', help='Pixel range.', default=iset, type=arg2slice)
@@ -196,23 +185,16 @@ if __name__ == "__main__" or __name__ == "viper.viper":
     argopt('-kapsig_ctpl', help='Kappa sigma values for the clipping of outliers in template creation.', default=0.6, type=float)
     argopt('-look', nargs='?', help='See final fit of chunk with pause.', default=[], const=':200', type=arg2range)
     argopt('-lookfast', nargs='?', help='See final fit of chunk without pause.', default=[], const=':200', type=arg2range)
-    argopt('-lookguess', nargs='?', help='Show initial model.', default=[], const=':200', type=arg2range)
-    argopt('-lookpar', nargs='?', help='See parameter of chunk.', default=[], const=':200', type=arg2range)
-    argopt('-lookres', nargs='?', help='Analyse the residuals.', default=[], const=':200', type=arg2range)
-    argopt('-lookctpl', nargs='?', help='Show created template.', default=[], const=':200', type=arg2range)
-    #argopt('-nexcl', help='Pattern ignore', default=[], type=arg2range)
     argopt('-molec', nargs='*', help='Molecular specifies; all: Automatic selection of all present molecules.', default=['all'], type=str)
     argopt('-nexcl', nargs='*', help='Ignore spectra with string pattern.', default=[], type=str)
     argopt('-nocell', help='Do the calibration without using the FTS.', action='store_true')
     argopt('-nset', help='Index for spectrum.', default=':', type=arg2slice)
     argopt('-oset', help='Index for order.', default=oset, type=arg2slice)
-    argopt('-output_format', nargs='*', help='Format of output files for rvo and par data (dat, fits, cpl).', default=['dat'], dest='oformat', type=str)
     argopt('-oversampling', help='Oversampling factor for the template data.', default=None, type=int)
     argopt('-rv_guess', help='RV guess.', default=1., type=float)   # slightly offsetted
     argopt('-tag', help='Output tag for filename.', default='tmp', type=str)
-    argopt('-targ', help='Target name requested in simbad for coordinates, proper motion, parallax and absolute RV.', dest='targname')
     argopt('-tellshift', nargs='?', help='Variable telluric wavelength shift (one value for all selected molecules).', default=False, const=True, type=int)
-    argopt('-telluric', help='Treating tellurics (mask: mask tellurics; sig: downweight tellurics; add: telluric forward modelling with one coeff for each molecule; add2: telluric forward modelling with combined coeff for non-water molecules).', default='', type=str)
+    argopt('-telluric', help='Treating tellurics (add: telluric forward modelling with one coeff for each molecule; add2: telluric forward modelling with combined coeff for non-water molecules).', default='', choices=['', 'add', 'add2'], type=str)
     argopt('-tpl_noRV', nargs='?', help='No stellar RV shift is applied to the telluric corrected spectrum. Just in combination with -createtpl.', default=False, const=True, type=int)
     argopt('-tpl_wave', help='Output wavelength of generated template (initial: take wavelengths from imput file; berv: apply barycentric correction to input wavelengths; tell: updated wavelength solution estimated via telluric lines).', default='initial', type=str)
     argopt('-tsig', help='(Relative) sigma value for weighting tellurics.', default=1, type=float)
@@ -231,12 +213,10 @@ if __name__ == "__main__" or __name__ == "viper.viper":
     globals().update(vars(args))
 
 
-def fit_chunk(order, chunk, obsname, targ=None, tpltarg=None):
+def fit_chunk(order, chunk, obsname, tpltarg=None):
     ####  observation  ####
-    pixel, wave_obs, spec_obs, err_obs, flag_obs, bjd, berv = Spectrum(obsname, order=order, targ=targ)
-    
-    if telluric == 'mask':
-        flag_obs[mskatm(wave_obs) > 0.1] |= flag.atm
+    pixel, wave_obs, spec_obs, err_obs, flag_obs, bjd, berv = Spectrum(obsname, order=order)
+
     flag_obs[np.isnan(spec_obs)] |= flag.nan
 
     # select common wavelength range
@@ -333,26 +313,6 @@ def fit_chunk(order, chunk, obsname, targ=None, tpltarg=None):
         if tellshift:
             par_atm.append((1, np.inf))
 
-    if demo & 1:
-        # pre-look raw input
-        # plot data, template, iodine, and tellurics with some scaling
-        gplot.xlabel('"Vacuum wavelength [Å]"')
-        gplot.ylabel('"flux"')
-        
-        if nocell:    
-            gplot(wave_obs, spec_obs/np.nanmedian(spec_obs), 'w lp lc 1 pt 7 ps 0.5 t "obs"')           
-        else:
-            s_cell = slice(*np.searchsorted(wave_cell, [lmin, lmax]))
-            gplot(wave_cell[s_cell], spec_cell[s_cell]/np.nanmedian(spec_cell[s_cell]), 'w l lc 9 t "cell",', wave_obs, spec_obs/np.nanmedian(spec_obs), 'w lp lc 1 pt 7 ps 0.5 t "obs"')       
-        if tplname:
-            s_tpl = slice(*np.searchsorted(wave_tpl[order], [lmin, lmax]))
-            gplot+(wave_tpl[order][s_tpl], spec_tpl[order][s_tpl]/np.nanmedian(spec_tpl[order][s_tpl]), 'w l lc 3 t "tpl"')
-        if 'add' in telluric:
-            gplot+(np.exp(lnwave_j), np.nanprod(specs_molec, axis=0), 'w l lc 2 t "atm"')
-        
-        pause('demo 1: raw input')
-
-
     # convert discrete template into a function
     if tplname:
         S_star = lambda x: np.interp(x, np.log(wave_tpl[order]) - np.log(1+berv/c), spec_tpl[order])  # Apply barycentric motion
@@ -363,21 +323,6 @@ def fit_chunk(order, chunk, obsname, targ=None, tpltarg=None):
 
     # setup the model
     S_mod = model(S_star, lnwave_j, spec_cell_j, specs_molec, IP, **modset)
-
-    if demo & 2:
-        # plot the IP
-        gplot.xlabel('"[km/s]"')
-        gplot.ylabel('"contribution"')
-        gplot(S_mod.vk, S_mod.IP(S_mod.vk), 't "IP model"')
-        pause('demo 2: default IP')
-
-    if demo & 4:
-       # plot again, now the stellar template can be interpolated
-       gplot.xlabel('"Vacuum wavelength [Å]"')
-       gplot.ylabel('"flux"')
-       gplot(np.exp(lnwave_j), spec_cell_j, S_star(lnwave_j)/np.nanmedian(S_star(lnwave_j)), 'w l lc 9 t "cell", "" us 1:3 w l lc 3 t "tpl"')
-       pause('demo 4: stellar template evaluated at lnwave_j')
-
 
     # an initial parameter set
     par = Params()
@@ -407,13 +352,6 @@ def fit_chunk(order, chunk, obsname, targ=None, tpltarg=None):
     if deg_bkg:
         par.bkg = [0] #* deg_bkg
 
-    if demo:
-        # disturb guess
-        par.norm = parguess.norm = [norm_guess*1.3] + [0]*deg_norm
-        # b = par_wave_guess = [wave_ob[0], (wave_obs[-1]-wave_obs[0])/wave_obs.size] # [6128.8833940969, 0.05453566108124]
-        par.wave = parguess.wave = [*np.polyfit(pixel[[400, -300]]-xcen-10, wave_obs[[400, -300]], 1)[::-1]] + [0]*(deg_wave-1)
-        par.ip = [par.ip[0]*1.5]
-
     if ip in Inst.ip_guess:
         par.ip = Inst.ip_guess[ip]
     elif ip in ('sg', 'mg', 'asg'):
@@ -426,40 +364,10 @@ def fit_chunk(order, chunk, obsname, targ=None, tpltarg=None):
 
     # set weighting parameter for tellurics
     sig = 1 * err_obs if (wgt in 'error') else np.ones_like(spec_obs)
-    if telluric in ('sig', 'add', 'add2'):
+    if telluric in ('add', 'add2'):
         sig[mskatm(wave_obs) < 0.1] = tsig
 
-    if demo & 8:
-        # a simple call to the forward model
-        # Si_mod = S_mod(pixel_ok, par_rv=0, a=a, b=b, s=s)
-        # show the start guess
-        S_mod.show(par, pixel_ok, spec_obs_ok, res=False, dx=0.1)
-        pause('demo 8: Smod simple call')
-
     fixed = lambda x: [(pk, 0) for pk in x]
-    if demo & 16:
-        # A wrapper to fit the continuum
-        par_d16 = Params(rv=(rv_guess, 0), norm=[norm_guess], wave=fixed(parguess.wave), ip=fixed(parguess.ip), atm=fixed(par.atm))
-        p_norm, _ = S_mod.fit(pixel_ok, spec_obs_ok, par_d16, res=False, dx=0.1, sig=sig[i_ok])
-        parguess.norm[0] = p_norm.norm[0]
-        pause('demo 16: S_par_norm')
-
-    if demo & 32:
-        # A wrapper to fit the wavelength solution
-        par_d32 = Params(rv=(rv_guess, 0), norm=fixed(parguess.norm), wave=parguess.wave[:-1]+[1e-15], ip=fixed(parguess.ip), atm=fixed(par.atm), bkg=[(0, 0)])
-        p_wave, _ = S_mod.fit(pixel_ok, spec_obs_ok, par_d32, res=False, dx=0.1, sig=sig[i_ok])
-        par.wave = p_wave.wave
-        pause('demo 32: S_par_wave')
-
-    if demo & 64:
-        # fit par_rv, a0 and b simultaneously
-        par_d64 = Params(rv=(rv_guess, 0), norm=parguess.norm, wave=par.wave, ip=fixed(parguess.ip), atm=fixed(par.atm), bkg=[(0, 0)])
-        params, _ = S_mod.fit(pixel_ok, spec_obs_ok, par_d64, res=False, dx=0.1, sig=sig[i_ok])
-        par = Params(params)
-        # remove uncertainties
-        par = par + dict([(k, v.value) for k,v in par.flat().items()])
-        pause('demo 64: S_par_norm_wave_rv')
-
 
     if ip in ('sg', 'ag', 'agr', 'bg', 'bnd'):
         # prefit with Gaussian IP
@@ -470,15 +378,6 @@ def fit_chunk(order, chunk, obsname, targ=None, tpltarg=None):
 
         par = par + par2.flat()   # update, but replace first ip par
     par3 = par
-
-    if order in lookguess:
-        if demo:
-            par_wave_guess = par_wave
-            par_norm = [norm_guess]
-        params_guess = Params(rv=par.rv, norm=par.norm, wave=parguess.wave, ip=par.ip, atm=parfix_atm, bkg=par.bkg)
-        prms = S_mod.show(params_guess, pixel_ok, spec_obs_ok, res=True, dx=0.1)
-        pause('lookguess')
-
 
     if kapsig[0]:
         # first kappa sigma clipping of outliers
@@ -501,8 +400,6 @@ def fit_chunk(order, chunk, obsname, targ=None, tpltarg=None):
         rr = S_mod.fit(spec_obs_ok, 0.1, **opt)
         fx = S_mod(pixel_ok, 0.1, rr[0])
         ipxj = S_mod.IPxj(rr[0])
-        if demo & 2:
-            gplot(ipxj, 'matrix w image')
 
         e_v = np.nan
         if tplname:
@@ -520,13 +417,10 @@ def fit_chunk(order, chunk, obsname, targ=None, tpltarg=None):
 
         best = S_mod.fit(spec_obs_ok, par_rv, **opt)
         fx = S_mod(pixel_ok, par_rv, best[0])
-        pause()
         S_mod.show([par_rv, best[0]], pixel_ok, spec_obs_ok, x2=pixel_ok)
         res = spec_obs_ok - fx
         np.savetxt('res.dat', list(zip(pixel_ok, res)), fmt="%s")
         prms = np.nanstd(res) / fx.nanmean() * 100
-        if order in look:
-            pause()
         return par_rv*1000, e_v*1000, bjd.jd, berv, best[0], np.diag(np.nan*best[0]), prms
     
     show = (order in look) or (order in lookfast)
@@ -645,40 +539,6 @@ def fit_chunk(order, chunk, obsname, targ=None, tpltarg=None):
         # overplot flagged and clipped data
         gplot+(pixel[flag_obs != 0], wave_obs[flag_obs != 0], spec_obs[flag_obs != 0], 1*(flag_obs[flag_obs != 0] == flag.clip), 'us (lam?$2:$1):3:(int($4)?5:9) w p pt 6 ps 0.5 lc 9 t "flagged and clipped"')
 
-    if infoprec:
-        # estimate velocity precision limit from stellar information content
-        # without iodine cell (smoothed to a constant)
-        S_pure = model(S_star, lnwave_j, spec_cell_j*0+np.nanmean(spec_cell_j), specs_molec, IP, **modset)
-        dS = S_pure(pixel+0.1, **par) - S_pure(pixel, **par)   # flux gradient from finite difference
-        du = 1000 * c * np.diff(wave_obs)*0.1 / wave_obs[:-1]   # [m/s] velocity differential from initial solution
-        # assuming spectrum given in photon counts (until viper propagates flux uncertainties)
-        varS = abs(spec_obs) + 5**2   # (5 = readout noise)
-        # RV precision Eq. (6) from Butler+ (1996PASP..108..500B)
-        ev_star = np.sum(((dS[:-1]/du)**2 / varS[:-1])[i_ok])**-0.5
-        print(f'Stellar RV precision limit: {ev_star} m/s')
-
-        # estimate velocity precision limit for the iodine from its RV information content
-        # now the star is smoothed
-        tpl_smooth = np.cumsum(spec_tpl[order])
-        wz = 1000   # window size
-        tpl_smooth = (tpl_smooth[wz:] - tpl_smooth[:-wz]) / wz
-        # gplot(spec_tpl[order], ',', tpl_smooth)
-        S_smooth = lambda x: np.interp(x, np.log(wave_tpl[order][wz//2:-wz//2])-berv/c, tpl_smooth)
-        iod_pure = model(S_smooth, lnwave_j, spec_cell_j, specs_molec, IP, **modset)
-        dS = iod_pure(pixel+0.1, **par) - iod_pure(pixel, **par)   # flux gradient from finite difference
-        ev_iod = np.sum(((dS[:-1]/du)**2 / varS[:-1])[i_ok])**-0.5
-        print(f'Iodine RV precision limit: {ev_iod} m/s')
-
-        # total precision is the squared sum of both
-        # in practice it will be worse, since more parameters are modelled
-        ev_total = np.sqrt(ev_star**2 + ev_iod**2)
-        print(f'Total RV precision limit: {ev_total} m/s')
-        if 1:
-            gplot2.xlabel('"pixel"')
-            gplot2.ylabel('"flux"')
-            gplot2(pixel, spec_obs, flag_obs, f' us 1:2:($3>0?9:1) lc var ps 0.5 t "data ({ev_total:.2f} m/s)",', pixel, iod_pure(pixel, **par)+np.nanmean(spec_obs)/2, flag_obs, f' us 1:2:($3>0?9:2) w l lc var t "offset + IP x iod ({ev_iod:.2f} m/s)",', pixel, S_pure(pixel, **par), flag_obs, f' us 1:2:($3>0?9:3) w l lc var t "IP x star ({ev_star:.2f} m/s)"')
-            pause()
-
     # overplot FTS iodine spectrum
     #gplot+(np.exp(lnwave_j), spec_cell_j/spec_cell_j.max()*spec_obs_ok.max(), 'w l lc 9')
     # overplot stellar spectrum
@@ -695,58 +555,6 @@ def fit_chunk(order, chunk, obsname, targ=None, tpltarg=None):
     prms = np.nanstd(res) / np.nanmean(fmod) * 100
     np.savetxt('res.dat', list(zip(pixel_ok, res)), fmt="%s")
 
-    if order in look:
-        pause('look %s:'% o, rvo, '+/- %.2f' % e_rvo)  # globals().update(locals())
-
-    if order in lookres:
-        gplot2.palette_defined('(0 "blue", 1 "green", 2 "red")')
-        gplot2.var(j=1, lab_ddS='"Finite second derivative 2S(i) - S(i+1) - S(i-1)"')
-        # shortcut "j" allows to toggle between flux and second derivative
-        gplot2.bind('j "j=(j+1) % 2; set xlabel (j==0? \\"S(i)\\" : lab_ddS) ;repl"')
-        gplot2.xlabel('lab_ddS')
-        gplot2.ylabel('"residuals S_i - S(i)"')
-        gplot2.cblabel('"pixel x_i"')
-        #gplot(pixel_ok, spec_obs_ok, S_mod(pixel_ok, **par), 2*spec_obs_ok-f[pixel_ok-1]-f[pixel_ok+1], 'us 3+j:($2-$3):1 w p pt 7 palette t ""')
-        gplot2(pixel_ok, spec_obs_ok, S_mod(pixel_ok, **par), 2*S_mod(pixel_ok, **par)-S_mod(pixel_ok-1, **par)-S_mod(pixel_ok+1, **par), 'us 3+j:($2-$3):1 w p pt 7 palette t ""')
-        pause(f'lookres {o}')
-
-    if order in lookpar:   
-        sa = tplname is not None
-        sb = sa + deg_norm+1
-        ss = sb + deg_wave+1
-        # error estimation
-        # uncertainty in continuum
-        xl = np.log(np.poly1d(par.wave[::-1])(pixel-xcen))
-        Cg = np.poly1d(parguess.norm[::-1])(pixel-xcen)      # continuum guess
-        Cp = np.poly1d(par.norm[::-1])(pixel-xcen)    # best continuum 
-        X = np.vander(xl, deg_norm+1)[:,::-1].T
-        e_Cp = np.einsum('ji,jk,ki->i', X, e_params[sa:sb,sa:sb], X)**0.5
-        # uncertainty in wavelength solution
-        X = np.vander(xl, deg_wave+1)[:,::-1].T
-        lam_g = np.poly1d(parguess.wave[::-1])(pixel-xcen)
-        lam = np.poly1d(par.wave[::-1])(pixel-xcen)
-        e_lam = np.einsum('ji,jk,ki->i', X, e_params[sb:ss,sb:ss], X)**0.5
-        e_wavesol = np.sum((e_lam/lam*3e8)**-2)**-0.5
-
-        # compare the wavelength solutions
-        #show_model(i, np.poly1d(b[::-1])(i), np.poly1d(par_wave_guess[::-1])(i), res=True)
-        gplot.reset()
-        gplot.multiplot("layout 2,2")
-        gplot.xlabel('"pixel"').ylabel('"k(x2)"')
-        gplot.mxtics().mytics()
-        gplot(f'[{ibeg}:{iend}][0:]', pixel, Cg, Cp, e_Cp, 'w l lc 9 t "guess",  "" us 1:3 w l lc 3, "" us 1:($3-$4):($3+$4) w filledcurves fill fs transparent solid 0.2 lc 3 t "1{/Symbol s}" ')
-        gplot.xlabel('"pixel"').ylabel('"deviation c * ({/Symbol l} / {/Symbol l}_{guess} - 1) [km/s]"')
-        gplot(f'[{ibeg}:{iend}]', pixel, (lam/lam_g-1)*c, ((lam-e_lam)/lam_g-1)*c, ((lam+e_lam)/lam_g-1)*c, 'w l lc 3, "" us 1:3:4 w filledcurves fill fs transparent solid 0.2 lc 3 t "1{/Symbol s}"')
-        gplot.xlabel('"[km/s]"').ylabel('"contribution"')
-        e_s = e_params[ss,ss]**0.5
-        gplot(S_mod.vk, S_mod.IP(S_mod.vk, *parguess.ip), ' lc 9 ps 0.5 t "IP_{guess}", ',
-              S_mod.vk, S_mod.IP(S_mod.vk, *par.ip),
-                        S_mod.IP(S_mod.vk, *[par.ip[0]-e_s, *par.ip[1:]]),
-                        S_mod.IP(S_mod.vk, *[par.ip[0]+e_s, *par.ip[1:]]),
-              'lc 3 ps 0.5 t "IP", "" us 1:3:4 w filledcurves fill fs transparent solid 0.2 lc 3 t "1{/Symbol s}"')
-        gplot.unset('multiplot')
-        pause('lookpar', par.ip)
-
     return rvo, e_rvo, bjd.jd, berv, par, e_params, prms
 
 
@@ -754,10 +562,7 @@ obsnames = np.array(sorted(glob.glob(obspath)))[nset]
 obsnames = [x for x in obsnames if not any(pat in os.path.basename(x) for pat in nexcl)]
 
 N = len(obsnames)
-if not N: pause('no files: ', obspath)
-
-if targname:
-    targ = Targ(targname, csv=tag+'.targ.csv').sc
+if not N: raise SystemExit('no files: ' + obspath)
 
 orders = np.r_[oset]
 print(orders)
@@ -774,8 +579,8 @@ colnums = orders if chunks == 1 else [f'{order}-{ch}' for order in orders for ch
 print('BJD RV e_RV BERV', *map("rv{0} e_rv{0}".format, colnums), 'filename', file=rvounit)
 
 # estimate wavelength range from observation
-pixel, wave0, spec0, err0, flag0, bjd, berv = Spectrum(obsnames[0], order=orders[0], targ=targ)
-pixel, wave1, spec1, err1, flag1, bjd, berv = Spectrum(obsnames[0], order=orders[-1], targ=targ)
+pixel, wave0, spec0, err0, flag0, bjd, berv = Spectrum(obsnames[0], order=orders[0])
+pixel, wave1, spec1, err1, flag1, bjd, berv = Spectrum(obsnames[0], order=orders[-1])
     
 obs_lmin = np.min([wave0[0], wave0[-1], wave1[0], wave1[-1]])
 obs_lmax = np.max([wave0[0], wave0[-1], wave1[0], wave1[-1]])
@@ -859,7 +664,7 @@ if tplname:
     print('reading stellar template')
     wave_tpl, spec_tpl = {}, {}
     for order in orders:
-        wave_tplo, spec_tplo = Tpl(tplname, order=order, targ=targ)
+        wave_tplo, spec_tplo = Tpl(tplname, order=order)
         if oversampling:
             us = np.linspace(np.log(wave_tplo[0]), np.log(wave_tplo[-1]), oversampling*wave_tplo.size)
             spec_tplo = np.nan_to_num(spec_tplo)
@@ -873,7 +678,7 @@ else:
 
 
 if createtpl:
-    wave_tplo, spec_tplo = Tpl(obsnames[-1], order=orders[-1], targ=targ)
+    wave_tplo, spec_tplo = Tpl(obsnames[-1], order=orders[-1])
     wmax = np.max(wave_tplo)
 else:
     wmax = np.max(wave_tpl[orders[-1]])
@@ -911,7 +716,7 @@ for n, obsname in enumerate(obsnames):
                 gplot.RV2title = lambda x: gplot.key('title noenhanced "%s (n=%s, o=%s%s)"'% (filename, n+1, o, x))
                 gplot.RV2title('')
         
-                rv[i_o*chunks+ch], e_rv[i_o*chunks+ch], bjd, berv, params, e_params, prms = fit_chunk(o, ch, obsname=obsname, targ=targ)
+                rv[i_o*chunks+ch], e_rv[i_o*chunks+ch], bjd, berv, params, e_params, prms = fit_chunk(o, ch, obsname=obsname)
 
                 print(n+1, o, ch, rv[i_o*chunks+ch], e_rv[i_o*chunks+ch])
                 # just for compability, remove Params(ipB=[]) later !!
@@ -1001,19 +806,15 @@ if createtpl:
             spec_tpl_new[order] = spec_t[0]
             err_tpl_new[order] = spec_t[0]*np.nan
 
-        if (order in lookfast) or (order in look) or (order in lookctpl):
+        if (order in lookfast) or (order in look):
             gplot(wave_tpl_new[order], spec_tpl_new[order] - 1 , 'w l lc 7 t "combined tpl"')
             for n in range(len(spec_t)):
-                gplot+(wave_tpl_new[order], spec_t[n]/np.nanmedian(spec_t[n]), 'w l t "%s"' % (os.path.split(obsnames[n])[1]))          
-            #gplot+(wave_tpl_new[order], np.nanstd(spec_t, axis=0)+1.5, 'w l t ""')
-        if (order in look) or (order in lookctpl):
-            pause()
+                gplot+(wave_tpl_new[order], spec_t[n]/np.nanmedian(spec_t[n]), 'w l t "%s"' % (os.path.split(obsnames[n])[1]))
 
     Inst.write_fits(wave_tpl_new, spec_tpl_new, err_tpl_new, obsnames, tag)
 
 rvounit.close()
 parunit.close()
-convert_output.convert_data(tag, args, dat='dat' in oformat, fits='fits' in oformat, cpl='cpl' in oformat)
 
 T = time.time() - T
 Tfmt = lambda t: time.strftime("%Hh%Mm%Ss", time.gmtime(t))
@@ -1021,16 +822,8 @@ print("processing time total:       ", Tfmt(T))
 print("processing time per spectrum:", Tfmt(T/N))
 print("processing time per chunk:   ", Tfmt(T/N/orders.size))
 
-if 'cpl' in oformat or 'fits' in oformat:
-    tag += '_rvo_par.fits'
-else:
-    tag += '.rvo.dat'
+tag += '.rvo.dat'
 
-if not createtpl:
-    vpr = vpr.VPR(tag)   # to print info statistic
-    if len(lookfast) or len(look):
-        gplot.reset()
-        vpr.plot_RV()
 print(tag, 'done.')
 
 def run():
