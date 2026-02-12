@@ -34,7 +34,6 @@ import astropy.units as u
 
 c = 299792.458   # [km/s] speed of light
 viperdir = os.path.dirname(os.path.realpath(__file__)) + os.sep
-crires_path = viperdir + "lib/CRIRES/"
 
 
 ###############################################################################
@@ -670,7 +669,6 @@ def Spectrum(filename='', order=None, targ=None):
     hdr = hdu[0].header
     ra = hdr.get('RA', np.nan)
     de = hdr.get('DEC', np.nan)
-    setting = hdr['ESO INS WLEN ID']
     nod_type = hdr['ESO PRO CATG']
 
 
@@ -700,12 +698,7 @@ def Spectrum(filename='', order=None, targ=None):
     berv = berv.to(u.km/u.s).value
     bjd = midtime.tdb
 
-    if 0: #str(setting) in ('K2148', 'K2166', 'K2192'):
-        file_wls = np.genfromtxt(crires_path+'wavesolution_own/wave_solution_'+str(setting)+'.dat', dtype=None, names=True).view(np.recarray)
-        coeff_wls = [file_wls.b1[order-1], file_wls.b2[order-1], file_wls.b3[order-1]]
-        wave = np.poly1d(coeff_wls[::-1])(pixel)
-    else:
-        wave = (hdu[detector].data["0"+str(order_drs)+"_01_WL"]) * 10
+    wave = (hdu[detector].data["0"+str(order_drs)+"_01_WL"]) * 10
 
     flag_pixel = 1 * np.isnan(spec)
 
