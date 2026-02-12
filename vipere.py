@@ -581,7 +581,7 @@ if __name__ == "__main__" or __name__ == "vipere":
     argopt('-oset', help='Index for order.', default=oset, type=arg2slice)
     argopt('-oversampling', help='Oversampling factor for the template data.', default=None, type=int)
     argopt('-rv_guess', help='RV guess.', default=1., type=float)
-    argopt('-tag', help='Output tag for filename.', default='tmp', type=str)
+    argopt('-o', dest='tag', help='Output basename for result files.', default='tmp', type=str)
     argopt('-tellshift', nargs='?', help='Variable telluric wavelength shift (one value for all selected molecules).', default=False, const=True, type=int)
     argopt('-telluric', help='Treating tellurics (add: telluric forward modelling with one coeff for each molecule; add2: telluric forward modelling with combined coeff for non-water molecules).', default='', choices=['', 'add', 'add2'], type=str)
     argopt('-tpl_noRV', nargs='?', help='No stellar RV shift is applied to the telluric corrected spectrum. Just in combination with -createtpl.', default=False, const=True, type=int)
