@@ -3,6 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #   "astropy",
+#   "matplotlib",
 #   "numpy",
 #   "pyyaml",
 #   "scipy",
@@ -17,8 +18,6 @@
 import argparse
 import glob
 import os
-import subprocess
-import tempfile
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -31,213 +30,12 @@ from astropy.coordinates import EarthLocation, SkyCoord
 from astropy.io import fits
 from astropy.time import Time
 import astropy.units as u
+import matplotlib.pyplot as plt
+
+plt.ion()
 
 c = 299792.458   # [km/s] speed of light
 viperdir = os.path.dirname(os.path.realpath(__file__)) + os.sep
-
-
-###############################################################################
-# Gnuplot interface
-###############################################################################
-
-class Gplot(object):
-   """
-   An interface between Python and gnuplot.
-
-   Creation of an instance opens a pipe to gnuplot and returns an object for communication.
-   Plot commands are send to gnuplot via the call method; arrays as arguments are handled.
-   Gnuplot options are set by calling them as method attributes.
-   Each method returns the object again. This allows to chain set and plot method.
-
-   Parameters
-   ----------
-   tmp : str, optional
-       Method for passing data.
-       * '$' - use inline datablock (default) (not faster than temporary data)
-       * None - create a non-persistent temporary file
-       * '' - create a local persistent file
-       * '-' - use gnuplot special filename (no interactive zoom available,
-               replot does not work)
-       * 'filename' - create manually a temporary file
-   stdout : boolean, optional
-       If true, plot commands are send to stdout instead to gnuplot pipe.
-   stderr : int, optional
-       Gnuplot prints errors and user prints to stderr (term output is sent to stdout). The
-       default stderr=None retains this behaviour. stderr=-1 (subprocess.PIPE) tries to
-       capture stderr so that the output can be redirected to the Jupyter cells instead of
-       parent console. This feature can be fragile and is experimental.
-   mode : str, optional
-       Primary command for the call method. The default is 'plot'. After creation it can
-       be changed, e.g. gplot.mode = gplot.splot.
-
-   args : array or str for function, file, or other plot commands like style
-   flush : str, optional
-       set to '' to suppress flush until next the ogplot (for large data sets)
-
-   Examples
-   --------
-
-   A simple plot and add a data set
-
-   >>> gplot('sin(x) w lp lt 2')
-   >>> gplot+(np.arange(10)**2., 'w lp lt 3')
-   >>> gplot+('"filename" w lp lt 3')
-
-   Pass multiple curves in one call
-
-   >>> gplot('x/5, 1, x**2/50 w l lt 3,', np.sqrt(np.arange(10)),' us 0:1 ps 2 pt 7 ,sin(x)')
-   >>> gplot.mxtics().mytics(2).repl
-   >>> gplot([1,2,3,4])
-   >>> gplot([1,2,3,4], [2,3,1,1.5])
-   >>> gplot([1,2,3,4], [[2,2,1,1.5], [3,1,4,5.5]])
-   >>> gplot([[2,2,1,1.5]])
-   >>> gplot([1],[2],[3],[4])
-   >>> gplot(1,2,3,4)
-
-   Pass options as function arguments or in the method name separated with underscore
-
-   >>> gplot.key_bottom_rev("left")('sin(x)')
-   """
-   version = subprocess.check_output(['gnuplot', '-V'])
-   version = float(version.split()[1])
-
-   def __init__(self, cmdargs='', tmp='$', mode='plot', stdout=False, stderr=None):
-      self.stdout = stdout
-      self.tmp = tmp
-      self.mode = getattr(self, mode)   # set the default mode for __call__ (plot, splot)
-      self.gnuplot = subprocess.Popen('gnuplot '+cmdargs, shell=True, stdin=subprocess.PIPE,
-                   stderr=stderr, universal_newlines=True, bufsize=0)
-      self.pid = self.gnuplot.pid
-      self.og = 0   # overplot number
-      self.buf = ''
-      self.tmp2 = []
-      self.flush = None
-      self.put = self._put
-      if stderr:
-          import fcntl
-          fcntl.fcntl(self.gnuplot.stderr, fcntl.F_SETFL, os.O_NONBLOCK)
-          self.put = self.PUT
-
-   def _plot(self, *args, **kwargs):
-      # collect all arguments
-      tmp = kwargs.pop('tmp', self.tmp)
-      flush = kwargs.pop('flush', '\n')
-      if self.version in [4.6] and flush=="\n": flush = "\n\n"
-      self.flush = flush
-      pl = ''
-      buf = ''
-      data = ()
-      if tmp in ('$',):
-           pl, self.buf = self.buf, pl
-
-      for arg in args + (flush,):
-         if isinstance(arg, (str, u''.__class__)):
-            if data:
-               data = zip(*data)
-               self.og += 1
-               tmpname = tmp
-               if tmp in ('-',):
-                  self.buf += "\n".join(" ".join(map(str,tup)) for tup in data)+"\ne\n"
-               elif tmp in ('$',):
-                  tmpname = "$data%s" % self.og
-                  buf += tmpname+" <<EOD\n"+("\n".join(" ".join(map(str,tup)) for tup in data))+"\nEOD\n"
-               elif tmp is None:
-                  self.tmp2.append(tempfile.NamedTemporaryFile())
-                  tmpname = self.tmp2[-1].name
-                  np.savetxt(self.tmp2[-1], list(data), fmt="%s")
-                  self.tmp2[-1].seek(0)
-               else:
-                  if tmp == '':
-                     tmpname = 'gptmp_'+str(self.pid)+str(self.og)
-                  np.savetxt(tmpname, list(data), fmt="%s")
-               pl += '"'+tmpname+'"'
-            pl += arg
-            data = ()
-         else:
-            _1D = hasattr(arg, '__iter__')
-            _2D = _1D and hasattr(arg[0], '__iter__') and not isinstance(arg[0], str)
-            data += tuple(arg) if _2D else (arg,) if _1D else ([arg],)
-
-      if tmp in ('$',):
-          self.put(buf, end='')
-          self.buf += pl
-          pl = ''
-      self.put(pl, end='')
-      if flush != '':
-          self.put(self.buf, end='')
-          self.buf = ''
-
-   def _put(self, *args, **kwargs):
-      print(file=None if self.stdout else self.gnuplot.stdin, *args, **kwargs)
-      return self
-
-   def PUT(self, *args, **kwargs):
-      self._put(*args, **kwargs)
-      self.gnuplot.stdin.write('printerr ""\n')
-      import time as _time
-      try:
-          _time.sleep(0.03)
-          s = self.gnuplot.stderr.read()[:-1]
-          if s: print(s, end='')
-      except:
-          pass
-      return self
-
-   def plot(self, *args, **kwargs):
-      self.og = 0; self.buf = ''; self.put('\n')
-      return self._plot('plot ', *args, **kwargs)
-
-   def splot(self, *args, **kwargs):
-      self.og = 0; self.buf = ''; self.put('\n')
-      return self._plot('splot ', *args, **kwargs)
-
-   def replot(self, *args, **kwargs):
-      return self._plot('replot ', *args, **kwargs)
-
-   def test(self, *args, **kwargs):
-      return self._plot('test', *args, **kwargs)
-
-   def oplot(self, *args, **kwargs):
-      pl = ',' if self.flush=='' else ' replot '
-      return self._plot(pl, *args, **kwargs)
-
-   def array(self, **kwargs):
-      for k,v in kwargs.items(): self.put("array %s[%d] = %s" % (k, len(v), list(v)))
-      return self
-
-   def var(self, **kwargs):
-      for i in kwargs.items(): self.put("%s=%s" % i)
-      return self
-
-   def __call__(self, *args, **kwargs):
-      return self.mode(*args, **kwargs)
-
-   def __getattr__(self, name):
-      if name in ('__repr__', '__str__'):
-         raise AttributeError
-      elif name=='repl':
-         return self.replot()
-      elif name.startswith(('load', 'pwd', 'set', 'show', 'system', 'unset', 'reset', 'print', 'bind')):
-         def func(*args):
-            return self.put(name.replace("_"," "), *args)
-         return func
-      else:
-         def func(*args):
-            return self.set(name.replace("_"," "), *args)
-         return func
-
-   def __add__(self, other):
-      self.oplot(*other) if other else self._plot()
-
-   def __sub__(self, other):
-      self(*other, flush='')
-
-   def __lt__(self, other):
-      self.oplot(*other, flush='')
-
-
-gplot = Gplot()
-gplot.colors('classic')
 
 
 ###############################################################################
@@ -500,33 +298,49 @@ class model:
         ymod = self(x, **params)
         if x2 is None:
             x2 = np.poly1d(params.wave[::-1])(x-self.xcen)
-        if par_rv:
-            gplot.RV2title(", v=%.2f ± %.2f m/s" % (par_rv*1000, par_rv.unc*1000))
-        gplot.put("if (!exists('lam')) {lam=1}")
-        gplot.key('horizontal')
-        gplot.xlabel('lam?"Vacuum wavelength [Å]":"Pixel x"')
-        gplot.ylabel('"flux"')
-        gplot.bind('"$" "lam=!lam; set xlabel lam?\\"Vacuum wavelength [Å]\\":\\"Pixel x\\"; replot"')
-        args = (x, y, ymod, x2, 'us lam?4:1:2:3 w lp pt 7 ps 0.5 t "obs",',
-          '"" us lam?4:1:3 w p pt 6 ps 0.5 lc 3 t "model"')
         prms = np.nan
-        if dx:
-            xx = np.arange(x.min(), x.max(), dx)
-            xx2 = np.poly1d(params.wave[::-1])(xx-self.xcen)
-            yymod = self(xx, **params)
-            args += (",", xx, yymod, xx2, 'us lam?3:1:2 w l lc 3 t ""')
+
+        fig = plt.figure(1)
+        fig.clf()
+
+        title = getattr(fig, '_rv2title', '')
+        if par_rv:
+            title += ", v=%.2f \u00b1 %.2f m/s" % (par_rv*1000, par_rv.unc*1000)
+
         if res or rel_fac:
             col2 = rel_fac * np.mean(ymod) * (y/ymod - 1) if rel_fac else y - ymod
             rms = np.std(col2)
             prms = rms / np.mean(ymod) * 100
-            gplot.mxtics().mytics().my2tics()
-        if res:
-            args += (",", x, col2, x2, "us lam?3:1:2 w p pt 7 ps 0.5 lc 1 t 'res (%.3g \~ %.3g%%)', 0 lc 3 t ''" % (rms, prms))
-        if rel_fac:
-            args += (",", x, col2, x2, "us lam?3:1:2 w l lc 1 t 'res (%.3g \~ %.3g%%)', 0 lc 3 t ''" % (rms, prms))
-        if res or rel_fac or dx:
-            gplot.yrange("[:%g]" % (1.4*np.nanmax(ymod)))
-            gplot(*args)
+            ax1, ax2 = fig.subplots(2, 1, sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+        else:
+            ax1 = fig.subplots(1, 1)
+            ax2 = None
+
+        ax1.plot(x2, y, '.', ms=3, label='obs')
+        ax1.plot(x2, ymod, '.', ms=3, color='C2', label='model')
+        if dx:
+            xx = np.arange(x.min(), x.max(), dx)
+            xx2 = np.poly1d(params.wave[::-1])(xx-self.xcen)
+            yymod = self(xx, **params)
+            ax1.plot(xx2, yymod, '-', color='C2', lw=0.8)
+        ax1.set_ylim(top=1.4*np.nanmax(ymod))
+        ax1.set_ylabel('flux')
+        ax1.legend(loc='upper right', fontsize='small')
+        if title:
+            ax1.set_title(title, fontsize='small')
+
+        if ax2 is not None:
+            style = '.' if res else '-'
+            ax2.plot(x2, col2, style, ms=3, color='C0', label='res (%.3g ~ %.3g%%)' % (rms, prms))
+            ax2.axhline(0, color='C2', lw=0.8)
+            ax2.set_xlabel(u'Vacuum wavelength [\u00c5]')
+            ax2.set_ylabel('residuals')
+            ax2.legend(loc='upper right', fontsize='small')
+        else:
+            ax1.set_xlabel(u'Vacuum wavelength [\u00c5]')
+
+        fig.tight_layout()
+        plt.pause(0.01)
         return prms
 
 
@@ -1006,7 +820,11 @@ def fit_chunk(order, chunk, obsname, rv_prev=None):
         spec_all[order, 2][n] = weight
 
     if show:
-        gplot+(pixel[flag_obs != 0], wave_obs[flag_obs != 0], spec_obs[flag_obs != 0], 1*(flag_obs[flag_obs != 0] == flag.clip), 'us (lam?$2:$1):3:(int($4)?5:9) w p pt 6 ps 0.5 lc 9 t "flagged and clipped"')
+        fig = plt.figure(1)
+        if fig.axes:
+            fig.axes[0].plot(wave_obs[flag_obs != 0], spec_obs[flag_obs != 0], 'x', ms=3, color='gray', label='flagged')
+            fig.axes[0].legend(loc='upper right', fontsize='small')
+            plt.pause(0.01)
 
     rvo, e_rvo = 1000*par.rv, 1000*par.rv.unc
 
@@ -1135,8 +953,8 @@ for n, obsname in enumerate(obsnames):
     for i_o, o in enumerate(orders):
         for ch in np.arange(chunks):
             try:
-                gplot.RV2title = lambda x: gplot.key('title noenhanced "%s (n=%s, o=%s%s)"'% (filename, n+1, o, x))
-                gplot.RV2title('')
+                fig1 = plt.figure(1)
+                fig1._rv2title = '%s (n=%s, o=%s)' % (filename, n+1, o)
 
                 rv[i_o*chunks+ch], e_rv[i_o*chunks+ch], bjd, berv, params, e_params, prms = fit_chunk(o, ch, obsname=obsname, rv_prev=rv_prev_order)
 
@@ -1187,11 +1005,6 @@ if createtpl:
     err_tpl_new = {}
     orders_ok = sorted(set([kk[0] for kk in spec_all.keys()]))
     for order in orders_ok:
-        gplot.reset()
-        gplot.key("title 'order: %s' noenhance" % (order))
-        gplot.xlabel('"Vacuum wavelength [Å]"')
-        gplot.ylabel('"flux"')
-        gplot.yrange("[%g:%g]" % (-1, 1.6))
         wave_t = np.array(list(spec_all[order, 0].values()))
         spec_t = np.array(list(spec_all[order, 1].values()))
         weight_t = np.array(list(spec_all[order, 2].values()))
@@ -1226,9 +1039,19 @@ if createtpl:
             err_tpl_new[order] = spec_t[0]*np.nan
 
         if (order in lookfast) or (order in look):
-            gplot(wave_tpl_new[order], spec_tpl_new[order] - 1 , 'w l lc 7 t "combined tpl"')
+            fig2 = plt.figure(2)
+            fig2.clf()
+            ax = fig2.add_subplot(111)
+            ax.plot(wave_tpl_new[order], spec_tpl_new[order] - 1, '-', color='gray', label='combined tpl')
             for n in range(len(spec_t)):
-                gplot+(wave_tpl_new[order], spec_t[n]/np.nanmedian(spec_t[n]), 'w l t "%s"' % (os.path.split(obsnames[n])[1]))
+                ax.plot(wave_tpl_new[order], spec_t[n]/np.nanmedian(spec_t[n]), '-', label=os.path.split(obsnames[n])[1])
+            ax.set_ylim(-1, 1.6)
+            ax.set_xlabel(u'Vacuum wavelength [\u00c5]')
+            ax.set_ylabel('flux')
+            ax.set_title('order: %s' % order)
+            ax.legend(loc='upper right', fontsize='small')
+            fig2.tight_layout()
+            plt.pause(0.01)
 
     write_fits(wave_tpl_new, spec_tpl_new, err_tpl_new, obsnames, tag)
 
