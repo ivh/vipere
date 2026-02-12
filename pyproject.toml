@@ -15,7 +15,6 @@ requires-python = ">=3.10"
 keywords = ["astronomy", "spectroscopy", "telluric", "CRIRES"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Topic :: Scientific/Engineering :: Astronomy",
     "Development Status :: 4 - Beta",
 ]
