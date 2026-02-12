@@ -696,6 +696,19 @@ flag = nameddict(
 )
 
 
+def local_sigma(resid, halfwin=50):
+    """Sliding-window MAD-based sigma estimate (scaled to Gaussian std)."""
+    n = len(resid)
+    sigma = np.empty(n)
+    for i in range(n):
+        lo = max(0, i - halfwin)
+        hi = min(n, i + halfwin + 1)
+        window = resid[lo:hi]
+        valid = window[np.isfinite(window)]
+        sigma[i] = np.nanmedian(np.abs(valid - np.nanmedian(valid))) * 1.4826 if len(valid) > 3 else np.inf
+    return sigma
+
+
 def arg2slice(arg):
     """Convert string argument to a slice."""
     if isinstance(arg, str):
@@ -774,7 +787,7 @@ if __name__ == "__main__" or __name__ == "vipere":
     globals().update(vars(args))
 
 
-def fit_chunk(order, chunk, obsname):
+def fit_chunk(order, chunk, obsname, rv_prev=None):
     ####  observation  ####
     pixel, wave_obs, spec_obs, err_obs, flag_obs, bjd, berv = Spectrum(obsname, order=order)
 
@@ -862,7 +875,12 @@ def fit_chunk(order, chunk, obsname):
     S_mod = model(S_star, lnwave_j, specs_molec, IP_func, **modset)
 
     par = Params()
-    par.rv = rv_guess if tplname else (0, 0)
+    if not tplname:
+        par.rv = (0, 0)
+    elif rv_prev is not None:
+        par.rv = rv_prev
+    else:
+        par.rv = rv_guess
 
     norm_guess = np.nanmean(spec_obs_ok) / np.nanmean(S_star(np.log(wave_obs_ok)))
     par.norm = [norm_guess] + [0]*deg_norm
@@ -906,7 +924,7 @@ def fit_chunk(order, chunk, obsname):
         smod = S_mod(pixel, **par3)
         resid = spec_obs - smod
         resid[flag_obs != 0] = np.nan
-        flag_obs[abs(resid) >= (kapsig[0]*np.nanstd(resid))] |= flag.clip
+        flag_obs[abs(resid) >= kapsig[0] * local_sigma(resid)] |= flag.clip
         i_ok = np.where(flag_obs == 0)[0]
         pixel_ok = pixel[i_ok]
         wave_obs_ok = wave_obs[i_ok]
@@ -931,7 +949,7 @@ def fit_chunk(order, chunk, obsname):
         resid[flag_obs != 0] = np.nan
 
         nr_k1 = np.count_nonzero(flag_obs)
-        flag_obs[abs(resid) >= (kapsig[-1]*np.nanstd(resid))] |= flag.clip
+        flag_obs[abs(resid) >= kapsig[-1] * local_sigma(resid)] |= flag.clip
         nr_k2 = np.count_nonzero(flag_obs)
 
         if nr_k1 != nr_k2:
@@ -1113,14 +1131,17 @@ for n, obsname in enumerate(obsnames):
             os.system('rm -rf '+viperdir+'res/*.dat')
     filename = os.path.basename(obsname)
     print(f"{n+1:3d}/{N}", filename)
+    rv_prev_order = None
     for i_o, o in enumerate(orders):
         for ch in np.arange(chunks):
             try:
                 gplot.RV2title = lambda x: gplot.key('title noenhanced "%s (n=%s, o=%s%s)"'% (filename, n+1, o, x))
                 gplot.RV2title('')
 
-                rv[i_o*chunks+ch], e_rv[i_o*chunks+ch], bjd, berv, params, e_params, prms = fit_chunk(o, ch, obsname=obsname)
+                rv[i_o*chunks+ch], e_rv[i_o*chunks+ch], bjd, berv, params, e_params, prms = fit_chunk(o, ch, obsname=obsname, rv_prev=rv_prev_order)
 
+                if np.isfinite(e_rv[i_o*chunks+ch]) and e_rv[i_o*chunks+ch] < 100:
+                    rv_prev_order = rv[i_o*chunks+ch] / 1000  # m/s → km/s
                 print(n+1, o, ch, rv[i_o*chunks+ch], e_rv[i_o*chunks+ch])
                 if 'ipB' in params: params.pop('ipB')
                 if not deg_bkg: params.pop('bkg', None)
@@ -1143,13 +1164,17 @@ for n, obsname in enumerate(obsnames):
                 print("Order failed due to:", repr(e))
 
     if not np.isnan(rv).all():
-        oo = np.isfinite(e_rv)
+        oo = np.isfinite(e_rv) & (e_rv > 0)
         if oo.sum() == 1:
             RV = rv[oo][0]
             e_RV = e_rv[oo][0]
+        elif oo.sum() > 1:
+            w = 1 / e_rv[oo]**2
+            RV = np.average(rv[oo], weights=w)
+            e_RV = 1 / np.sqrt(np.sum(w))
         else:
-            RV = np.nanmean(rv[oo])
-            e_RV = np.nanstd(rv[oo])/(oo.sum()-1)**0.5
+            RV = np.nanmean(rv)
+            e_RV = np.nan
         print('RV:', RV, e_RV, bjd, berv)
 
         print(bjd, RV, e_RV, berv, *sum(zip(rv, e_rv), ()), filename, file=rvounit)
@@ -1189,8 +1214,9 @@ if createtpl:
 
             if kapsig_ctpl:
                 spec_mean = np.nanmedian(spec_t, axis=0)
+                spec_scatter = np.nanmedian(np.abs(spec_t - spec_mean), axis=0) * 1.4826
                 for nn in range(0, len(spec_t)):
-                    weight_t[nn][np.abs(spec_t[nn]-spec_mean)>kapsig_ctpl] = np.nan
+                    weight_t[nn][np.abs(spec_t[nn]-spec_mean) > kapsig_ctpl * spec_scatter] = np.nan
 
             spec_tpl_new[order] = np.nansum(spec_t*weight_t, axis=0) / np.nansum(weight_t, axis=0)
             err_tpl_new[order] = np.nanstd(spec_t, axis=0)
