@@ -574,8 +574,7 @@ if __name__ == "__main__" or __name__ == "vipere":
     argopt('-iset', help='Pixel range.', default=iset, type=arg2slice)
     argopt('-kapsig', nargs='*', help='Kappa sigma values for the clipping stages. Zero does not clip.', default=[0], type=float)
     argopt('-kapsig_ctpl', help='Kappa sigma values for the clipping of outliers in template creation.', default=0.6, type=float)
-    argopt('-look', nargs='?', help='See final fit of chunk with pause.', default=[], const=':200', type=arg2range)
-    argopt('-lookfast', nargs='?', help='See final fit of chunk without pause.', default=[], const=':200', type=arg2range)
+    argopt('-plot', help='Plot level: 0=off, 1=plot with pause, 2=plot without pause.', default=0, type=int)
     argopt('-molec', nargs='*', help='Molecular specifies; all: Automatic selection of all present molecules.', default=['all'], type=str)
     argopt('-nexcl', nargs='*', help='Ignore spectra with string pattern.', default=[], type=str)
     argopt('-nset', help='Index for spectrum.', default=':', type=arg2slice)
@@ -744,7 +743,7 @@ def fit_chunk(order, chunk, obsname, rv_prev=None):
         wave_obs_ok = wave_obs[i_ok]
         spec_obs_ok = spec_obs[i_ok]
 
-    show = (order in look) or (order in lookfast)
+    show = plot > 0
 
     par.wave = parguess.wave
     if 'wave' in fix: par.wave = fixed(parguess.wave)
@@ -825,6 +824,8 @@ def fit_chunk(order, chunk, obsname, rv_prev=None):
             fig.axes[0].plot(wave_obs[flag_obs != 0], spec_obs[flag_obs != 0], 'x', ms=3, color='gray', label='flagged')
             fig.axes[0].legend(loc='upper right', fontsize='small')
             plt.pause(0.01)
+        if plot == 1:
+            input('Press Enter to continue...')
 
     rvo, e_rvo = 1000*par.rv, 1000*par.rv.unc
 
@@ -1038,7 +1039,7 @@ if createtpl:
             spec_tpl_new[order] = spec_t[0]
             err_tpl_new[order] = spec_t[0]*np.nan
 
-        if (order in lookfast) or (order in look):
+        if plot > 0:
             fig2 = plt.figure(2)
             fig2.clf()
             ax = fig2.add_subplot(111)
@@ -1052,6 +1053,8 @@ if createtpl:
             ax.legend(loc='upper right', fontsize='small')
             fig2.tight_layout()
             plt.pause(0.01)
+            if plot == 1:
+                input('Press Enter to continue...')
 
     write_fits(wave_tpl_new, spec_tpl_new, err_tpl_new, obsnames, tag)
 
