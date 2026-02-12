@@ -1,5 +1,44 @@
 [build-system]
-requires = [
-    "setuptools >= 45",
-]
+requires = ["setuptools >= 45"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "vipere"
+version = "1.1"
+description = "RV reduction pipeline"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+authors = [
+    { name = "Zechmeister, Koehler", email = "jana@tls-tautenburg.de" },
+]
+requires-python = ">=3.7"
+keywords = ["python"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Intended Audience :: Developers",
+    "Development Status :: 4 - Beta",
+]
+dependencies = [
+    "astropy",
+    "numpy",
+    "scipy",
+]
+
+[project.urls]
+Homepage = "https://mzechmeister.github.io/viper_RV_pipeline"
+Documentation = "https://mzechmeister.github.io/viper_RV_pipeline/doc/VIPER-pipeline-manual.pdf"
+Source = "https://github.com/mzechmeister/viper"
+
+[project.scripts]
+viper = "vipere:run"
+
+[project.optional-dependencies]
+doc = ["sphinx"]
+
+[tool.setuptools]
+py-modules = ["vipere"]
+
+[tool.setuptools.package-data]
+vipere = ["lib/**"]
