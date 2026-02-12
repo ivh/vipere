@@ -348,54 +348,6 @@ class Params(nesteddict):
 
 
 ###############################################################################
-# FTS resampling
-###############################################################################
-
-def FTSfits(ftsname):
-
-    if ftsname.endswith(".dat"):
-        data = np.loadtxt(ftsname)
-        w = data[:, 0]
-        f = data[:, 1]
-        f = f[::-1]
-        w = 1e8 / w[::-1]
-    elif ftsname.endswith(".fits"):
-        hdu = fits.open(ftsname, ignore_blank=True, output_verify='silentfix')
-
-        hdr = hdu[0].header
-        cdelt1 = hdr.get('CDELT1', 'none')
-
-        if cdelt1 == 'none':
-            wavetype = hdr.get('wavetype', 'none')
-            unit = hdr.get('unit', 'none')
-            w = hdu[1].data['wave']
-            f = hdu[1].data['flux']
-
-            if wavetype == 'wavenumber':  w = 1e8 / w[::-1]
-            if unit == 'nm': w *= 10
-
-        else:
-            f = hdu[0].data[::-1]
-            try:
-                w = hdr['CRVAL1'] + hdr['CDELT1'] * (np.arange(f.size) + 1. - hdr['CRPIX1'])
-            except:
-                w = hdr['CRVAL1'] + hdr['CDELT1'] * (np.arange(f.size) + 1.)
-            w = 1e8 / w[::-1]
-
-    return w, f
-
-
-def resample(w, f, dv=100):
-    '''
-    dv: Sampling step for uniform log(lambda) [m/s]
-    '''
-    lnw = np.log(w)
-    lnwj = np.arange(lnw[0], lnw[-1], dv / (c * 1000))
-    iod_j = np.interp(lnwj, lnw, f)
-    return w, f, lnwj, iod_j
-
-
-###############################################################################
 # IP functions and forward model
 ###############################################################################
 
@@ -655,7 +607,6 @@ crires_location = EarthLocation.from_geodetic(
 
 oset = '1:28'  # covers up to 9 orders/det (Y/J band); K/H use fewer via -oset
 ip_guess = {'s': 1.5}
-fts_default = 'lib/CRIRES/FTS/CRp_SGC2_FTStmpl-HR0p007-WN3000-5000_Kband.dat'
 
 
 def Spectrum(filename='', order=None, targ=None):
@@ -724,10 +675,6 @@ def Tpl(tplname, order=None, targ=None):
         wave *= 1 + berv/c
 
     return wave, spec
-
-
-def FTS(ftsname=fts_default, dv=100):
-    return resample(*FTSfits(ftsname), dv=dv)
 
 
 def write_fits(wtpl_all, tpl_all, e_all, list_files, file_out):
@@ -894,7 +841,6 @@ if __name__ == "__main__" or __name__ == "vipere":
     argopt('obspath', help='Filename of observation.', default='data/TLS/betgem/BETA_GEM.fits', type=str)
     argopt('tplname', help='Filename of template.', nargs='?', type=str)
     argopt('-inst', help='Instrument.', default='CRIRES', choices=insts)
-    argopt('-fts', help='Filename of FTS Cell.', default=viperdir + fts_default, dest='ftsname', type=str)
     argopt('-ip', help='IP model (g: Gaussian, ag: asymmetric (skewed) Gaussian, sg: super Gaussian, bg: biGaussian, mg: multiple Gaussians, mcg: multiple central Gaussians, bnd: bandmatrix).', default='g', choices=[*IPs], type=str)
     argopt('-chunks', nargs='?', help='Divide one order into a number of chunks.', default=1, type=int)
     argopt('-config_file', help='YAML config file to override defaults.', type=str)
@@ -914,7 +860,6 @@ if __name__ == "__main__" or __name__ == "vipere":
     argopt('-lookfast', nargs='?', help='See final fit of chunk without pause.', default=[], const=':200', type=arg2range)
     argopt('-molec', nargs='*', help='Molecular specifies; all: Automatic selection of all present molecules.', default=['all'], type=str)
     argopt('-nexcl', nargs='*', help='Ignore spectra with string pattern.', default=[], type=str)
-    argopt('-nocell', help='Do the calibration without using the FTS.', action='store_true')
     argopt('-nset', help='Index for spectrum.', default=':', type=arg2slice)
     argopt('-oset', help='Index for order.', default=oset, type=arg2slice)
     argopt('-oversampling', help='Oversampling factor for the template data.', default=None, type=int)
@@ -1228,19 +1173,12 @@ pixel, wave1, spec1, err1, flag1, bjd, berv = Spectrum(obsnames[0], order=orders
 obs_lmin = np.min([wave0[0], wave0[-1], wave1[0], wave1[-1]])
 obs_lmax = np.max([wave0[0], wave0[-1], wave1[0], wave1[-1]])
 
-####  FTS  ####
-if ftsname != 'None':
-    wave_cell, spec_cell, lnwave_j_full, spec_cell_j_full = FTS(ftsname)
-else:
-    wave_cell = np.linspace(obs_lmin, obs_lmax, len(pixel)*len(orders)*200)
-    spec_cell = wave_cell*0 + 1
-    lnw = np.log(wave_cell)
-    lnwave_j_full = np.arange(lnw[0], lnw[-1], 200/3e8)
-    spec_cell_j_full = lnwave_j_full*0 + 1
-
-if nocell:
-    spec_cell = spec_cell*0 + 1
-    spec_cell_j_full = spec_cell_j_full*0 + 1
+####  Log-lambda grid  ####
+wave_cell = np.linspace(obs_lmin, obs_lmax, len(pixel)*len(orders)*200)
+spec_cell = np.ones_like(wave_cell)
+lnw = np.log(wave_cell)
+lnwave_j_full = np.arange(lnw[0], lnw[-1], 200/3e8)
+spec_cell_j_full = np.ones_like(lnwave_j_full)
 
 mskatm = lambda x: np.interp(x, *np.genfromtxt(viperdir+'lib/mask_vis1.0.dat').T)
 
