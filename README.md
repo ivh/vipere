@@ -1,40 +1,34 @@
-<a href="https://ascl.net/2108.006"><img src="https://img.shields.io/badge/ascl-2108.006-blue.svg?colorB=262255" alt="ascl:2108.006" /></a>
+# vipere - Telluric correction for CRIRES+ spectra
 
-# viper - Velocity and IP EstimatoR
+Forked and adapted from [viper](https://github.com/mzechmeister/viper) by Zechmeister & Koehler.
+Simplified to a single-file tool focused on telluric removal and stellar template creation for CRIRES+ data.
 
-For further information, manual, support visit https://mzechmeister.github.io/viper_RV_pipeline .
+Author: Alexis Lavail (with help from Claude)
 
-Download viper:
-```
-git clone https://github.com/mzechmeister/viper.git
-```
+## Requirements
 
-Download demo data:
-```
-git clone https://github.com/mzechmeister/viper_demo_data.git
-```
+- Python >= 3.10
+- astropy, numpy, scipy
+- gnuplot (for plotting)
 
-Installation (run from viper directory):
+## Usage
+
+Run directly with [uv](https://docs.astral.sh/uv/):
 ```bash
-pip install -e .
+uv run vipere.py "data/WASP18/cr2res*.fits" \
+  -createtpl -nocell -fts None -telluric add -tsig 10 -tpl_wave tell \
+  -deg_norm 2 -deg_wave 2 -oset 1:28 -tag data/WASP18/tpl1
 ```
 
-Or using [uv](https://docs.astral.sh/uv/):
+Or install and run:
 ```bash
 uv pip install -e .
+vipere "data/WASP18/cr2res*.fits" -createtpl -nocell -fts None -telluric add -oset 1:28 -tag output
 ```
 
-To run:
-```
-viper "data/TLS/HD189733/*" data/TLS/HD189733_tpl/HARPS*fits -oset 19:21 -nset :4
-```
-This runs from order 19 (inclusive) to 21 (exclusive) for the first 4 observational files.
+See `vipere -?` for all options.
 
-To analyse the RVs afterwards use:
-```
-vpr <tag>
-```
-`<tag>` defaults to `tmp` in `viper` and `vpr`. See `viper -?` for more options.
+## Citation
 
-If you publish results with viper, please acknowledge it by citing its bibcode from https://ui.adsabs.harvard.edu/abs/2021ascl.soft08006Z.
-Lower case and monospace font is preferred, i.e. in LaTeX `{\tt viper}`.
+If you use this tool, please cite the original viper pipeline:
+https://ui.adsabs.harvard.edu/abs/2021ascl.soft08006Z

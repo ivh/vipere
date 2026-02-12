@@ -4,20 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vipere"
-version = "1.1"
-description = "RV reduction pipeline"
+version = "0.1"
+description = "Telluric correction and template creation for CRIRES+ spectra"
 readme = "README.md"
 license = "GPL-3.0-or-later"
 authors = [
-    { name = "Zechmeister, Koehler", email = "jana@tls-tautenburg.de" },
+    { name = "Alexis Lavail" },
 ]
-requires-python = ">=3.7"
-keywords = ["python"]
+requires-python = ">=3.10"
+keywords = ["astronomy", "spectroscopy", "telluric", "CRIRES"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Topic :: Scientific/Engineering :: Astronomy",
-    "Intended Audience :: Developers",
     "Development Status :: 4 - Beta",
 ]
 dependencies = [
@@ -27,12 +26,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://mzechmeister.github.io/viper_RV_pipeline"
-Documentation = "https://mzechmeister.github.io/viper_RV_pipeline/doc/VIPER-pipeline-manual.pdf"
-Source = "https://github.com/mzechmeister/viper"
+Source = "https://git.astro.lavail.net/alexis/vipere"
+Upstream = "https://github.com/mzechmeister/viper"
 
 [project.scripts]
-viper = "vipere:run"
+vipere = "vipere:run"
 
 [project.optional-dependencies]
 doc = ["sphinx"]

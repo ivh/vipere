@@ -1,7 +1,17 @@
 #! /usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "astropy",
+#   "numpy",
+#   "scipy",
+# ]
+# ///
 ## Licensed under a GPLv3 style license - see LICENSE
-## vipere - Velocity and IP Estimator
-## Copyright (C) Mathias Zechmeister and Jana Koehler
+## vipere - Telluric correction for CRIRES+ spectra
+## Author: Alexis Lavail (with help from Claude)
+## Forked and adapted from viper (https://github.com/mzechmeister/viper)
+## Original authors: Mathias Zechmeister and Jana Koehler
 
 import argparse
 import configparser
@@ -884,10 +894,10 @@ if __name__ == "__main__" or __name__ == "vipere":
     Tell = None
     iset = slice(None)
 
-    # read in default values from config_viper.ini
+    # read in default values from config_vipere.ini
     configs_inst, configs_user = {}, {}
     config_default = configparser.ConfigParser()
-    config_default.read(viperdir+'config_viper.ini')
+    config_default.read(viperdir+'config_vipere.ini')
     configs_def = dict(config_default['DEFAULT'])
     if preargs.inst in config_default.sections():
         configs_inst = dict(config_default[preargs.inst])
@@ -904,7 +914,7 @@ if __name__ == "__main__" or __name__ == "vipere":
             else:
                 print('WARNING: Declared section is not found in %s. Use DEFAULT values instead.' % preargs.config_file[0])
 
-    parser = argparse.ArgumentParser(description='VIPER - velocity and IP Estimator', add_help=False, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(description='vipere - Telluric correction for CRIRES+ spectra', add_help=False, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     argopt = parser.add_argument
     argopt('obspath', help='Filename of observation.', default='data/TLS/betgem/BETA_GEM.fits', type=str)
     argopt('tplname', help='Filename of template.', nargs='?', type=str)
