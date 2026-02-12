@@ -672,7 +672,7 @@ def Spectrum(filename='', order=None, targ=None):
     de = hdr.get('DEC', np.nan)
     setting = hdr['ESO INS WLEN ID']
     nod_type = hdr['ESO PRO CATG']
-    cal = hdr['ESO PRO REC1 CAL* CATG']
+
 
     try:
         if str(nod_type) != 'OBS_NODDING_EXTRACT_COMB': raise
@@ -706,14 +706,6 @@ def Spectrum(filename='', order=None, targ=None):
         wave = np.poly1d(coeff_wls[::-1])(pixel)
     else:
         wave = (hdu[detector].data["0"+str(order_drs)+"_01_WL"]) * 10
-
-    if 'CAL_FLAT_EXTRACT_1D' not in str(cal):
-        try:
-            hdu_blaze = fits.open(crires_path+'blaze_own.fits', ignore_blank=True)
-            blaze = hdu_blaze[setting].data["0"+str(order_drs)+"_0"+str(detector)+"_BLAZE"]
-            spec /= blaze
-        except (KeyError, IndexError):
-            pass
 
     flag_pixel = 1 * np.isnan(spec)
 
