@@ -237,9 +237,7 @@ class Gplot(object):
 
 
 gplot = Gplot()
-ogplot = gplot.oplot
 gplot.colors('classic')
-gplot2 = Gplot()
 
 
 ###############################################################################
@@ -386,13 +384,6 @@ def IP_asg(vk, s=2.2, e=2., a=1):
         mu += IP_k.dot(vk)
     return IP_k
 
-def IP_sbg(vk, s1=2.2, s2=1, e=2.):
-    """super bi-Gaussian"""
-    IP_k = np.exp(-abs((vk+mu)/s)**e)
-    IP_k *= (1+erf(a/np.sqrt(2) * (vk+mu)))
-    IP_k /= IP_k.sum()
-    return IP_k
-
 def IP_bg(vk, s1=2., s2=2.):
     """BiGaussian"""
     xc = np.sqrt(2/np.pi) * (-s1**2 + s2**2) / (s1+s2)
@@ -433,7 +424,7 @@ def IP_lor(vk, s=2.2):
     IP_k /= IP_k.sum()
     return IP_k
 
-IPs = {'g': IP, 'sg': IP_sg, 'sbg': IP_sbg, 'ag': IP_ag, 'agr': IP_agr, 'asg': IP_asg, 'bg': IP_bg, 'mg': IP_mg, 'mcg': IP_mcg, 'lor': IP_lor, 'bnd': 'bnd'}
+IPs = {'g': IP, 'sg': IP_sg, 'ag': IP_ag, 'agr': IP_agr, 'asg': IP_asg, 'bg': IP_bg, 'mg': IP_mg, 'mcg': IP_mcg, 'lor': IP_lor}
 
 
 def poly(x, a):
@@ -454,7 +445,7 @@ class model:
     '''
     def __init__(self, *args, func_norm=poly, IP_hs=50, xcen=0):
         self.xcen = xcen
-        self.S_star, self.lnwave_j, self.spec_cell_j, self.fluxes_molec, self.IP = args
+        self.S_star, self.lnwave_j, self.fluxes_molec, self.IP = args
         self.dx = self.lnwave_j[1] - self.lnwave_j[0]
         self.IP_hs = IP_hs
         self.vk = np.arange(-IP_hs, IP_hs+1) * self.dx * c
@@ -464,13 +455,13 @@ class model:
     def __call__(self, pixel, rv=0, norm=[1], wave=[], ip=[], atm=[], bkg=[0], ipB=[]):
         coeff_norm, coeff_wave, coeff_ip, coeff_atm, coeff_bkg, coeff_ipB = norm, wave, ip, atm, bkg, ipB
 
-        spec_gas = 1 * self.spec_cell_j
+        spec_gas = 1
 
         if len(self.fluxes_molec):
             flux_atm = np.nanprod(np.power(self.fluxes_molec, np.abs(coeff_atm[:len(self.fluxes_molec)])[:, np.newaxis]), axis=0)
             if len(coeff_atm) == len(self.fluxes_molec)+1:
                 flux_atm = np.interp(self.lnwave_j, self.lnwave_j-np.log(1+coeff_atm[-1]/c), flux_atm)
-            spec_gas *= flux_atm
+            spec_gas = flux_atm
 
         Sj_eff = np.convolve(self.IP(self.vk, *coeff_ip), self.S_star(self.lnwave_j-rv/c) * (spec_gas + coeff_bkg[0]), mode='valid')
 
@@ -537,64 +528,6 @@ class model:
             gplot.yrange("[:%g]" % (1.4*np.nanmax(ymod)))
             gplot(*args)
         return prms
-
-
-class model_bnd(model):
-    '''
-    The forward model with band matrix.
-    '''
-    def __init__(self, *args, func_norm=poly, IP_hs=50, xcen=0):
-        self.xcen = xcen
-        self.S_star, self.lnwave_j, self.spec_cell_j, self.IP = args
-        self.dx = self.lnwave_j[1] - self.lnwave_j[0]
-        self.IP_hs = IP_hs
-        self.vk = np.arange(-IP_hs, IP_hs+1) * self.dx * c
-        self.lnwave_j_eff = self.lnwave_j[IP_hs:-IP_hs]
-        self.func_norm = func_norm
-
-    def base(self, x=None, degk=3, sig_k=1):
-        '''Setup the base functions.'''
-        self.x = x
-        bg = self.IP
-        lnwave_obs = np.log(np.poly1d(bg[::-1])(x-self.xcen))
-        j = np.arange(self.lnwave_j.size)
-        jx = np.interp(lnwave_obs, self.lnwave_j, j)
-        vl = np.array([-1.4, -0.7, 0, 0.7, 1.4])[np.newaxis,np.newaxis,:]
-        self.bnd = jx[:,np.newaxis].astype(int) + np.arange(-self.IP_hs, self.IP_hs+1)
-        self.BBxjl = np.exp(-(self.lnwave_j[self.bnd][...,np.newaxis]-lnwave_obs[:,np.newaxis,np.newaxis]+sig_k*vl)**2/sig_k**2)
-        self.Bxk = np.vander(x-x.mean(), degk)[:,::-1]
-
-    def Axk(self, v, **kwargs):
-        if kwargs:
-            self.base(**kwargs)
-        starj = self.S_star(self.lnwave_j-v/c)
-        _Axkl = np.einsum('xj,xjl,xk->xkl', (starj*self.spec_cell_j)[self.bnd], self.BBxjl, self.Bxk)
-        return _Axkl
-
-    def IPxj(self, akl, **kwargs):
-        if kwargs:
-            self.base(**kwargs)
-        IPxj = np.einsum('xjl,xk,kl->xj', self.BBxjl, self.Bxk, akl.reshape(self.Bxk.shape[1], -1))
-        return IPxj
-
-    def fit(self, f, v, **kwargs):
-        Axkl = self.Axk(v, **kwargs)
-        return np.linalg.lstsq(Axkl.reshape((len(Axkl), -1)), f, rcond=1e-32)
-
-    def __call__(self, x, v, ak, **kwargs):
-        Axkl = self.Axk(v, **kwargs)
-        fx = Axkl.reshape((len(Axkl), -1)) @ ak
-        return fx
-
-
-def show_model(x, y, ymod, res=True):
-    gplot(x, y, ymod, 'w lp pt 7 ps 0.5 t "S_i",',
-          '"" us 1:3 w lp pt 6 ps 0.5 lc 3 t "S(i)"')
-    if res:
-        rms = np.std(y-ymod)
-        gplot.mxtics().mytics().my2tics()
-        gplot.y2range('[-0.2:2]').ytics('nomirr').y2tics()
-        gplot+(x, y-ymod, "w p pt 7 ps 0.5 lc 1 axis x1y2 t 'res %.3g', 0 lc 3 axis x1y2" % rms)
 
 
 ###############################################################################
@@ -757,15 +690,9 @@ class nameddict(dict):
 flag = nameddict(
     ok=       0,
     nan=      1,
-    neg=      2,
-    sat=      4,
-    atm=      8,
-    sky=     16,
-    out=     32,
-    clip=    64,
-    lowQ=   128,
-    badT=   256,
-    chunk=  512,
+    out=      2,
+    clip=     4,
+    chunk=    8,
 )
 
 
@@ -779,41 +706,6 @@ def arg2range(arg):
     return  eval('np.r_['+arg+']')
 
 
-def SSRstat(vgrid, SSR, dk=1, plot='maybe', N=None):
-    '''
-    Analyse chi2 peak.
-
-    Parameters
-    ----------
-    N: Number of data points in the fit. Needed to estimate 1 sigma uncertainty and when SSR are not chi2 values.
-    '''
-    k = np.argmin(SSR[dk:-dk]) + dk
-    vpeak = vgrid[k-dk:k+dk+1]
-    SSRpeak = SSR[k-dk:k+dk+1] - SSR[k]
-    v_step = vgrid[1] - vgrid[0]
-    a = np.array([0, (SSR[k+dk]-SSR[k-dk])/(2*v_step), (SSR[k+dk]-2*SSR[k]+SSR[k-dk])/(2*v_step**2)])
-    v = (SSR[k+dk]-SSR[k-dk]) / (SSR[k+dk]-2*SSR[k]+SSR[k-dk]) * 0.5 * v_step
-    v = vgrid[k] - a[1]/2./a[2]
-    e_v = np.nan
-    if -1 in SSR:
-        print('opti warning: bad ccf.')
-    elif a[2] <= 0:
-        print('opti warning: a[2]=%f<=0.' % a[2])
-    elif not vgrid[0] <= v <= vgrid[-1]:
-        print('opti warning: v not in [va,vb].')
-    else:
-        e_v = 1. / a[2]**0.5
-        if N:
-            SSRmin = SSR[k] + a[0] - a[1] * a[1]/2./a[2] + a[2] * (a[1]/2./a[2]) **2
-            e_v *= (SSRmin/N) **0.5
-
-    if (plot==1 and np.isnan(e_v)) or plot==2:
-        gplot2.yrange('[*:%f]' % np.max(SSR))
-        gplot2(vgrid, SSR-SSR[k], " w lp, vk="+str(vgrid[k])+", %f+(x-vk)*%f+(x-vk)**2*%f," % tuple(a), [v,v], [0,SSR[1]], 'w l t "%f km/s"'%v)
-        gplot2+(vpeak, SSRpeak, ' lt 1 pt 6; set yrange [*:*]')
-    return v, e_v, a
-
-
 if __name__ == "__main__" or __name__ == "vipere":
     argparse.ArgumentDefaultsHelpFormatter._split_lines = lambda self, text, width: text.splitlines()
 
@@ -823,7 +715,6 @@ if __name__ == "__main__" or __name__ == "vipere":
     preparser.add_argument('-config_file', help='YAML config file to override defaults.', type=str)
     preargs = preparser.parse_known_args()[0]
 
-    Tell = None
     iset = slice(None)
 
     # read in default values from config_vipere.yaml
@@ -841,7 +732,7 @@ if __name__ == "__main__" or __name__ == "vipere":
     argopt('obspath', help='Filename of observation.', default='data/TLS/betgem/BETA_GEM.fits', type=str)
     argopt('tplname', help='Filename of template.', nargs='?', type=str)
     argopt('-inst', help='Instrument.', default='CRIRES', choices=insts)
-    argopt('-ip', help='IP model (g: Gaussian, ag: asymmetric (skewed) Gaussian, sg: super Gaussian, bg: biGaussian, mg: multiple Gaussians, mcg: multiple central Gaussians, bnd: bandmatrix).', default='g', choices=[*IPs], type=str)
+    argopt('-ip', help='IP model (g: Gaussian, ag: asymmetric (skewed) Gaussian, sg: super Gaussian, bg: biGaussian, mg: multiple Gaussians, mcg: multiple central Gaussians).', default='g', choices=[*IPs], type=str)
     argopt('-chunks', nargs='?', help='Divide one order into a number of chunks.', default=1, type=int)
     argopt('-config_file', help='YAML config file to override defaults.', type=str)
     argopt('-createtpl', nargs='?', help='Removal of telluric features (or cell lines) and combination of several observations.', default=False, const=True, type=int)
@@ -883,21 +774,20 @@ if __name__ == "__main__" or __name__ == "vipere":
     globals().update(vars(args))
 
 
-def fit_chunk(order, chunk, obsname, tpltarg=None):
+def fit_chunk(order, chunk, obsname):
     ####  observation  ####
     pixel, wave_obs, spec_obs, err_obs, flag_obs, bjd, berv = Spectrum(obsname, order=order)
 
     flag_obs[np.isnan(spec_obs)] |= flag.nan
 
-    lmin = max(wave_obs[iset][0], wave_tpl[order][0], wave_cell[0])
-    lmax = min(wave_obs[iset][-1], wave_tpl[order][-1], wave_cell[-1])
+    lmin = max(wave_obs[iset][0], wave_tpl[order][0], wave_grid[0])
+    lmax = min(wave_obs[iset][-1], wave_tpl[order][-1], wave_grid[-1])
 
     flag_obs[np.log(wave_obs) < np.log(lmin)+vcut/c] |= flag.out
     flag_obs[np.log(wave_obs) > np.log(lmax)-vcut/c] |= flag.out
 
     sj = slice(*np.searchsorted(lnwave_j_full, np.log([lmin, lmax])))
     lnwave_j = lnwave_j_full[sj]
-    spec_cell_j = spec_cell_j_full[sj]
 
     ibeg, iend = np.where(flag_obs==0)[0][[0, -1]]
 
@@ -915,11 +805,10 @@ def fit_chunk(order, chunk, obsname, tpltarg=None):
             msk_wave = lambda x: np.interp(x, msk_w, msk_f)
             flag_obs[msk_wave(wave_obs) > 0.1] |= flag.clip
 
-    if 1:
-        kap = 6
-        p17, smod, p83 = np.percentile(spec_obs[flag_obs==0], [17, 50, 83])
-        sig = (p83 - p17) / 2
-        flag_obs[spec_obs > smod+kap*sig] |= flag.clip
+    kap = 6
+    p17, smod, p83 = np.percentile(spec_obs[flag_obs==0], [17, 50, 83])
+    sig = (p83 - p17) / 2
+    flag_obs[spec_obs > smod+kap*sig] |= flag.clip
 
     i_ok = np.where(flag_obs==0)[0]
     pixel_ok = pixel[i_ok]
@@ -933,7 +822,7 @@ def fit_chunk(order, chunk, obsname, tpltarg=None):
         modset['func_norm'] = lambda x, par_norm: pade(x, par_norm[:deg_norm+1], par_norm[deg_norm+1:])
 
     specs_molec = []
-    par_atm = parfix_atm = []
+    par_atm = []
     if 'add' in telluric:
         specs_molec = np.zeros((0, len(lnwave_j)))
         for mol in specs_molec_all.keys():
@@ -970,12 +859,12 @@ def fit_chunk(order, chunk, obsname, tpltarg=None):
 
     IP_func = IPs[ip]
 
-    S_mod = model(S_star, lnwave_j, spec_cell_j, specs_molec, IP_func, **modset)
+    S_mod = model(S_star, lnwave_j, specs_molec, IP_func, **modset)
 
     par = Params()
     par.rv = rv_guess if tplname else (0, 0)
 
-    norm_guess = np.nanmean(spec_obs_ok) / np.nanmean(S_star(np.log(wave_obs_ok))) / np.nanmean(spec_cell_j)
+    norm_guess = np.nanmean(spec_obs_ok) / np.nanmean(S_star(np.log(wave_obs_ok)))
     par.norm = [norm_guess] + [0]*deg_norm
 
     if deg_norm_rat:
@@ -1006,8 +895,8 @@ def fit_chunk(order, chunk, obsname, tpltarg=None):
 
     fixed = lambda x: [(pk, 0) for pk in x]
 
-    if ip in ('sg', 'ag', 'agr', 'bg', 'bnd'):
-        S_modg = model(S_star, lnwave_j, spec_cell_j, specs_molec, IPs['g'], **modset)
+    if ip in ('sg', 'ag', 'agr', 'bg'):
+        S_modg = model(S_star, lnwave_j, specs_molec, IPs['g'], **modset)
         par1 = Params(par, ip=par.ip[0:1])
         par2, _ = S_modg.fit(pixel_ok, spec_obs_ok, par1, sig=sig[i_ok])
         par = par + par2.flat()
@@ -1023,48 +912,18 @@ def fit_chunk(order, chunk, obsname, tpltarg=None):
         wave_obs_ok = wave_obs[i_ok]
         spec_obs_ok = spec_obs[i_ok]
 
-    if IP_func == 'bnd':
-        S_mod = model_bnd(S_star, lnwave_j, spec_cell_j, params[2], **modset)
-        opt = {'x': pixel_ok, 'sig_k': par_ip[0]/1.5/c}
-        rr = S_mod.fit(spec_obs_ok, 0.1, **opt)
-        fx = S_mod(pixel_ok, 0.1, rr[0])
-        ipxj = S_mod.IPxj(rr[0])
-
-        e_v = np.nan
-        if tplname:
-            vv = np.arange(-1, 1, 0.1)
-            RR = []
-            aa = []
-            for v in vv:
-                rr = S_mod.fit(spec_obs_ok, v, **opt)
-                RR.append(*rr[1])
-                aa.append(rr[0])
-                if 1:
-                    print(v, rr[1])
-
-            par_rv, e_v, a = SSRstat(vv, RR, plot=1, N=spec_obs_ok.size)
-
-        best = S_mod.fit(spec_obs_ok, par_rv, **opt)
-        fx = S_mod(pixel_ok, par_rv, best[0])
-        S_mod.show([par_rv, best[0]], pixel_ok, spec_obs_ok, x2=pixel_ok)
-        res = spec_obs_ok - fx
-        np.savetxt('res.dat', list(zip(pixel_ok, res)), fmt="%s")
-        prms = np.nanstd(res) / fx.nanmean() * 100
-        return par_rv*1000, e_v*1000, bjd.jd, berv, best[0], np.diag(np.nan*best[0]), prms
-
     show = (order in look) or (order in lookfast)
 
-    if 1:
-        par.wave = parguess.wave
-        if 'wave' in fix: par.wave = fixed(parguess.wave)
-        if ipB:
-            par.bkg = [(0, 0)]
-            par.ipB = [(ipB[0], 0)]
-        if deg_bkg:
-            par.bkg = [0]
+    par.wave = parguess.wave
+    if 'wave' in fix: par.wave = fixed(parguess.wave)
+    if ipB:
+        par.bkg = [(0, 0)]
+        par.ipB = [(ipB[0], 0)]
+    if deg_bkg:
+        par.bkg = [0]
 
-        par4, e_params = S_mod.fit(pixel_ok, spec_obs_ok, par, dx=0.1*show, sig=sig[i_ok], res=(not createtpl)*show, rel_fac=createtpl*show)
-        par = par4
+    par4, e_params = S_mod.fit(pixel_ok, spec_obs_ok, par, dx=0.1*show, sig=sig[i_ok], res=(not createtpl)*show, rel_fac=createtpl*show)
+    par = par4
 
     if kapsig[-1]:
         smod = S_mod(pixel, **par)
@@ -1094,19 +953,10 @@ def fit_chunk(order, chunk, obsname, tpltarg=None):
             par5, e_params = S_mod.fit(pixel_ok, spec_obs_ok, par3, dx=0.1*show, sig=sig[i_ok], res=(not createtpl)*show, rel_fac=createtpl*show)
             par = par5
 
-        if wgt in 'tell':
-           sig = smod**2/spec_obs
-           sig /= np.nanmedian(sig[i_ok])
-           sig[spec_obs/np.nanmedian(spec_obs[i_ok])<0.1] = 2
-
-        if (nr_k1 != nr_k2) or ('tell' in wgt):
-            par5, e_params = S_mod.fit(pixel_ok, spec_obs_ok, par3, dx=0.1*show, sig=sig[i_ok], res=(not createtpl)*show, rel_fac=createtpl*show)
-            par = par5
-
     if createtpl:
         if tplname:
             S_star = lambda x: 0*x + 1
-            S_mod = model(S_star, lnwave_j, spec_cell_j, specs_molec, IP_func, **modset)
+            S_mod = model(S_star, lnwave_j, specs_molec, IP_func, **modset)
 
         gas_model = np.nan * np.empty_like(pixel)
         gas_model[iset] = S_mod(pixel[iset], **par)
@@ -1174,11 +1024,9 @@ obs_lmin = np.min([wave0[0], wave0[-1], wave1[0], wave1[-1]])
 obs_lmax = np.max([wave0[0], wave0[-1], wave1[0], wave1[-1]])
 
 ####  Log-lambda grid  ####
-wave_cell = np.linspace(obs_lmin, obs_lmax, len(pixel)*len(orders)*200)
-spec_cell = np.ones_like(wave_cell)
-lnw = np.log(wave_cell)
+wave_grid = np.linspace(obs_lmin, obs_lmax, len(pixel)*len(orders)*200)
+lnw = np.log(wave_grid)
 lnwave_j_full = np.arange(lnw[0], lnw[-1], 200/3e8)
-spec_cell_j_full = np.ones_like(lnwave_j_full)
 
 mskatm = lambda x: np.interp(x, *np.genfromtxt(viperdir+'lib/mask_vis1.0.dat').T)
 
@@ -1237,7 +1085,7 @@ if tplname:
         else:
             wave_tpl[order], spec_tpl[order] = wave_tplo, spec_tplo
 else:
-    wave_tpl, spec_tpl = [wave_cell[[0, -1]]]*200, [np.ones(2)]*200
+    wave_tpl, spec_tpl = [wave_grid[[0, -1]]]*200, [np.ones(2)]*200
 
 
 if createtpl:
@@ -1246,19 +1094,15 @@ if createtpl:
 else:
     wmax = np.max(wave_tpl[orders[-1]])
 
-if telluric == 'add' and (wave_cell[-1] < wmax):
-    wave_cell_ext = np.arange(wave_cell[-1], wmax, wave_cell[-1]-wave_cell[-2])[1:]
-    spec_cell_ext = np.ones_like(wave_cell_ext)
+if telluric == 'add' and (wave_grid[-1] < wmax):
+    wave_grid_ext = np.arange(wave_grid[-1], wmax, wave_grid[-1]-wave_grid[-2])[1:]
+    wave_grid = np.append(wave_grid, wave_grid_ext)
 
-    wave_cell = np.append(wave_cell, wave_cell_ext)
-    spec_cell = np.append(spec_cell, spec_cell_ext)
-
-    lnwave_j = np.log(wave_cell)
+    lnwave_j = np.log(wave_grid)
     lnwave_j_full = np.arange(lnwave_j[0], lnwave_j[-1], 200/3e8)
-    spec_cell_j_full = np.interp(lnwave_j_full, lnwave_j, spec_cell)
 
     if not tplname:
-        wave_tpl, spec_tpl = [wave_cell[[0, -1]]]*200, [np.ones(2)]*200
+        wave_tpl, spec_tpl = [wave_grid[[0, -1]]]*200, [np.ones(2)]*200
 
 T = time.time()
 headrow = True
