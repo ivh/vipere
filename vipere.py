@@ -24,7 +24,8 @@ from datetime import datetime
 
 import numpy as np
 from scipy.interpolate import CubicSpline
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, least_squares
+from scipy.sparse import lil_matrix
 from scipy.special import erf
 from astropy.coordinates import EarthLocation, SkyCoord
 from astropy.io import fits
@@ -307,14 +308,21 @@ class model:
         if par_rv:
             title += ", v=%.2f \u00b1 %.2f m/s" % (par_rv*1000, par_rv.unc*1000)
 
+        show_stellar = res and len(self.fluxes_molec)
+
         if res or rel_fac:
             col2 = rel_fac * np.mean(ymod) * (y/ymod - 1) if rel_fac else y - ymod
             rms = np.std(col2)
             prms = rms / np.mean(ymod) * 100
-            ax1, ax2 = fig.subplots(2, 1, sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+            if show_stellar:
+                ax1, ax2, ax3 = fig.subplots(3, 1, sharex=True, gridspec_kw={'height_ratios': [3, 1, 1]})
+            else:
+                ax1, ax2 = fig.subplots(2, 1, sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+                ax3 = None
         else:
             ax1 = fig.subplots(1, 1)
             ax2 = None
+            ax3 = None
 
         ax1.plot(x2, y, '.', ms=3, label='obs')
         ax1.plot(x2, ymod, '.', ms=3, color='C2', label='model')
@@ -333,9 +341,21 @@ class model:
             style = '.' if res else '-'
             ax2.plot(x2, col2, style, ms=3, color='C0', label='res (%.3g ~ %.3g%%)' % (rms, prms))
             ax2.axhline(0, color='C2', lw=0.8)
-            ax2.set_xlabel(u'Vacuum wavelength [\u00c5]')
             ax2.set_ylabel('residuals')
             ax2.legend(loc='upper right', fontsize='small')
+
+        if ax3 is not None:
+            orig_S_star = self.S_star
+            self.S_star = lambda x: np.ones_like(x)
+            ygas = self(x, **params)
+            self.S_star = orig_S_star
+            stellar = y / ygas
+            stellar /= np.nanmedian(stellar)
+            ax3.plot(x2, stellar, '.', ms=3, color='C0')
+            ax3.set_xlabel(u'Vacuum wavelength [\u00c5]')
+            ax3.set_ylabel('stellar')
+        elif ax2 is not None:
+            ax2.set_xlabel(u'Vacuum wavelength [\u00c5]')
         else:
             ax1.set_xlabel(u'Vacuum wavelength [\u00c5]')
 
@@ -583,7 +603,9 @@ if __name__ == "__main__" or __name__ == "vipere":
     argopt('-rv_guess', help='RV guess.', default=1., type=float)
     argopt('-o', dest='tag', help='Output basename for result files.', default='tmp', type=str)
     argopt('-tellshift', nargs='?', help='Variable telluric wavelength shift (one value for all selected molecules).', default=False, const=True, type=int)
+    argopt('-tell_bic', help='BIC threshold for telluric model selection. The telluric model must improve BIC by at least this amount to be preferred over the no-telluric model. Set to 0 to disable.', default=10, type=float)
     argopt('-telluric', help='Treating tellurics (add: telluric forward modelling with one coeff for each molecule; add2: telluric forward modelling with combined coeff for non-water molecules).', default='', choices=['', 'add', 'add2'], type=str)
+    argopt('-global_atm', help='Fit atmosphere globally across all orders.', default=False, action='store_true')
     argopt('-tpl_noRV', nargs='?', help='No stellar RV shift is applied to the telluric corrected spectrum. Just in combination with -createtpl.', default=False, const=True, type=int)
     argopt('-tpl_wave', help='Output wavelength of generated template (initial: take wavelengths from imput file; berv: apply barycentric correction to input wavelengths; tell: updated wavelength solution estimated via telluric lines).', default='initial', type=str)
     argopt('-tsig', help='(Relative) sigma value for weighting tellurics.', default=1, type=float)
@@ -600,7 +622,8 @@ if __name__ == "__main__" or __name__ == "vipere":
     globals().update(vars(args))
 
 
-def fit_chunk(order, chunk, obsname, rv_prev=None):
+def setup_chunk(order, chunk, obsname, rv_prev=None):
+    '''Set up data, model and parameters for one order/chunk. Returns a dict.'''
     ####  observation  ####
     pixel, wave_obs, spec_obs, err_obs, flag_obs, bjd, berv = Spectrum(obsname, order=order)
 
@@ -641,11 +664,12 @@ def fit_chunk(order, chunk, obsname, rv_prev=None):
     wave_obs_ok = wave_obs[i_ok]
     spec_obs_ok = spec_obs[i_ok]
 
-    modset['xcen'] = xcen = np.nanmean(pixel_ok) + 18
-    modset['IP_hs'] = iphs
+    modset_local = dict(modset)
+    modset_local['xcen'] = xcen = np.nanmean(pixel_ok) + 18
+    modset_local['IP_hs'] = iphs
 
     if deg_norm_rat:
-        modset['func_norm'] = lambda x, par_norm: pade(x, par_norm[:deg_norm+1], par_norm[deg_norm+1:])
+        modset_local['func_norm'] = lambda x, par_norm: pade(x, par_norm[:deg_norm+1], par_norm[deg_norm+1:])
 
     specs_molec = []
     par_atm = []
@@ -685,7 +709,7 @@ def fit_chunk(order, chunk, obsname, rv_prev=None):
 
     IP_func = IPs[ip]
 
-    S_mod = model(S_star, lnwave_j, specs_molec, IP_func, **modset)
+    S_mod = model(S_star, lnwave_j, specs_molec, IP_func, **modset_local)
 
     par = Params()
     if not tplname:
@@ -724,10 +748,8 @@ def fit_chunk(order, chunk, obsname, rv_prev=None):
     if telluric in ('add', 'add2'):
         sig[mskatm(wave_obs) < 0.1] = tsig
 
-    fixed = lambda x: [(pk, 0) for pk in x]
-
     if ip in ('sg', 'ag', 'agr', 'bg'):
-        S_modg = model(S_star, lnwave_j, specs_molec, IPs['g'], **modset)
+        S_modg = model(S_star, lnwave_j, specs_molec, IPs['g'], **modset_local)
         par1 = Params(par, ip=par.ip[0:1])
         par2, _ = S_modg.fit(pixel_ok, spec_obs_ok, par1, sig=sig[i_ok])
         par = par + par2.flat()
@@ -743,6 +765,31 @@ def fit_chunk(order, chunk, obsname, rv_prev=None):
         wave_obs_ok = wave_obs[i_ok]
         spec_obs_ok = spec_obs[i_ok]
 
+    return {
+        'pixel': pixel, 'wave_obs': wave_obs, 'spec_obs': spec_obs,
+        'err_obs': err_obs, 'flag_obs': flag_obs, 'bjd': bjd, 'berv': berv,
+        'i_ok': i_ok, 'pixel_ok': pixel_ok, 'wave_obs_ok': wave_obs_ok,
+        'spec_obs_ok': spec_obs_ok,
+        'S_mod': S_mod, 'S_star': S_star, 'IP_func': IP_func,
+        'specs_molec': specs_molec, 'lnwave_j': lnwave_j,
+        'par': par, 'par3': par3, 'parguess': parguess, 'par_atm': par_atm,
+        'sig': sig, 'xcen': xcen, 'modset': modset_local,
+        'order': order, 'chunk': chunk,
+    }
+
+
+def fit_chunk(order, chunk, obsname, rv_prev=None):
+    s = setup_chunk(order, chunk, obsname, rv_prev)
+    pixel = s['pixel']; wave_obs = s['wave_obs']; spec_obs = s['spec_obs']
+    err_obs = s['err_obs']; flag_obs = s['flag_obs']; bjd = s['bjd']; berv = s['berv']
+    i_ok = s['i_ok']; pixel_ok = s['pixel_ok']; wave_obs_ok = s['wave_obs_ok']
+    spec_obs_ok = s['spec_obs_ok']
+    S_mod = s['S_mod']; S_star = s['S_star']; IP_func = s['IP_func']
+    specs_molec = s['specs_molec']; lnwave_j = s['lnwave_j']
+    par = s['par']; par3 = s['par3']; parguess = s['parguess']; par_atm = s['par_atm']
+    sig = s['sig']; xcen = s['xcen']; modset_local = s['modset']
+
+    fixed = lambda x: [(pk, 0) for pk in x]
     show = plot > 0
 
     par.wave = parguess.wave
@@ -784,10 +831,51 @@ def fit_chunk(order, chunk, obsname, rv_prev=None):
             par5, e_params = S_mod.fit(pixel_ok, spec_obs_ok, par3, dx=0.1*show, sig=sig[i_ok], res=(not createtpl)*show, rel_fac=createtpl*show)
             par = par5
 
+    # BIC model comparison: telluric vs no-telluric
+    if telluric and len(specs_molec):
+        fmod_tell = S_mod(pixel_ok, **par)
+        rss_tell = np.sum((spec_obs_ok - fmod_tell)**2)
+        k_tell = len(par.vary())
+        n_data = len(pixel_ok)
+        bic_tell = n_data * np.log(rss_tell / n_data) + k_tell * np.log(n_data)
+
+        S_mod_notell = model(S_star, lnwave_j, [], IP_func, **modset_local)
+        par_notell = Params(parguess)
+        if 'wave' in fix:
+            par_notell.wave = [(p.value, 0) for p in parguess.wave]
+        if deg_bkg:
+            par_notell.bkg = [0]
+        if ipB:
+            par_notell.bkg = [(0, 0)]
+            par_notell.ipB = [(ipB[0], 0)]
+        sig_notell = 1 * err_obs if (wgt == 'error') else np.ones_like(spec_obs)
+
+        try:
+            par_notell_fit, e_params_notell = S_mod_notell.fit(
+                pixel_ok, spec_obs_ok, par_notell, sig=sig_notell[i_ok])
+            fmod_notell = S_mod_notell(pixel_ok, **par_notell_fit)
+            rss_notell = np.sum((spec_obs_ok - fmod_notell)**2)
+            k_notell = len(par_notell_fit.vary())
+            bic_notell = n_data * np.log(rss_notell / n_data) + k_notell * np.log(n_data)
+
+            if bic_notell <= bic_tell + tell_bic:
+                print('  BIC: no-telluric preferred (%.1f vs %.1f, threshold %.1f)' % (bic_notell, bic_tell, tell_bic))
+                par_notell_fit.atm = [(np.nan, 0)] * len(par_atm)
+                par = par_notell_fit
+                S_mod = S_mod_notell
+                e_params = e_params_notell
+                if show:
+                    S_mod.show(par, pixel_ok, spec_obs_ok, par_rv=par.rv,
+                               dx=0.1, res=(not createtpl)*show, rel_fac=createtpl*show)
+            else:
+                print('  BIC: telluric preferred (%.1f vs %.1f)' % (bic_tell, bic_notell))
+        except Exception:
+            print('  BIC: no-telluric fit failed, keeping telluric model')
+
     if createtpl:
         if tplname:
             S_star = lambda x: 0*x + 1
-            S_mod = model(S_star, lnwave_j, specs_molec, IP_func, **modset)
+            S_mod = model(S_star, lnwave_j, specs_molec, IP_func, **modset_local)
 
         gas_model = np.nan * np.empty_like(pixel)
         gas_model[iset] = S_mod(pixel[iset], **par)
@@ -835,6 +923,208 @@ def fit_chunk(order, chunk, obsname, rv_prev=None):
     np.savetxt('res.dat', list(zip(pixel_ok, res)), fmt="%s")
 
     return rvo, e_rvo, bjd.jd, berv, par, e_params, prms
+
+
+def _order_par(par, o):
+    '''Extract shared (rv, atm) + order-specific params from combined Params.'''
+    opar = Params()
+    opar.rv = par.rv
+    opar.atm = par.atm
+    opar.norm = par['norm_o%d' % o]
+    opar.wave = par['wave_o%d' % o]
+    opar.ip = par['ip_o%d' % o]
+    opar.bkg = par['bkg_o%d' % o]
+    return opar
+
+
+def _build_sparsity(varykeys, orders, boundaries, n_data):
+    '''Build Jacobian sparsity matrix: shared params affect all rows,
+    per-order params affect only their order's rows.'''
+    n_params = len(varykeys)
+    sparsity = lil_matrix((n_data, n_params), dtype=int)
+
+    # Map order suffix to row slice
+    order_slices = {o: slice(boundaries[idx], boundaries[idx+1])
+                    for idx, o in enumerate(orders)}
+
+    for j, key in enumerate(varykeys):
+        # Check if this is a per-order param (contains '_o<number>')
+        order_id = None
+        if isinstance(key, tuple):
+            name = str(key[0])
+        else:
+            name = str(key)
+        for o in orders:
+            suffix = '_o%d' % o
+            if suffix in name:
+                order_id = o
+                break
+
+        if order_id is not None:
+            # Per-order param: only affects its order's rows
+            sparsity[order_slices[order_id], j] = 1
+        else:
+            # Shared param (rv, atm): affects all rows
+            sparsity[:, j] = 1
+
+    return sparsity.tocsc()
+
+
+def _run_least_squares(combined, orders, models, boundaries,
+                       pixel_cat, spec_cat, sig_cat):
+    '''Run least_squares with sparse Jacobian on the joint problem.'''
+    varykeys, varyvals = zip(*combined.vary().items())
+    varyvals = np.array(varyvals, dtype=float)
+    n_data = len(pixel_cat)
+
+    sparsity = _build_sparsity(varykeys, orders, boundaries, n_data)
+
+    def residual_func(params):
+        par_now = combined + dict(zip(varykeys, params))
+        out = np.empty(n_data)
+        for idx, o in enumerate(orders):
+            opar = _order_par(par_now, o)
+            sl = slice(boundaries[idx], boundaries[idx+1])
+            out[sl] = (models[o](pixel_cat[sl], **opar) - spec_cat[sl]) / sig_cat[sl]
+        return out
+
+    result = least_squares(residual_func, varyvals, jac_sparsity=sparsity,
+                           method='trf', x_scale='jac')
+
+    par_fit = combined + dict(zip(varykeys, result.x))
+
+    # Covariance: (J^T J)^{-1} * s^2, where s^2 = cost*2 / (n-p)
+    J = result.jac
+    n_p = n_data - len(varyvals)
+    s2 = 2 * result.cost / max(n_p, 1)
+    try:
+        JtJ = (J.T @ J).toarray() if hasattr(J, 'toarray') else J.T @ J
+        cov = np.linalg.inv(JtJ) * s2
+        for k, v in zip(varykeys, np.sqrt(np.diag(cov))):
+            par_fit[k].unc = v
+    except np.linalg.LinAlgError:
+        cov = np.full((len(varyvals), len(varyvals)), np.inf)
+        for k in varykeys:
+            par_fit[k].unc = np.inf
+
+    return par_fit, cov
+
+
+def fit_multi(setups, orders):
+    '''Joint fit with shared rv+atm and per-order norm/wave/ip/bkg.'''
+    # Build combined Params: shared rv + atm, per-order everything else
+    s0 = setups[orders[0]]
+    combined = Params()
+    combined.rv = s0['par'].rv
+
+    # For shared atm: a molecule is free if free in ANY order;
+    # initialize value from median of per-order pre-fits (par3)
+    n_atm = len(s0['par_atm'])
+    shared_atm = list(s0['par_atm'])
+    for o in orders[1:]:
+        for i, pa in enumerate(setups[o]['par_atm']):
+            if i < n_atm and pa[1] != 0:
+                shared_atm[i] = pa
+
+    # Collect pre-fitted atm values from par3 across orders
+    atm_values = np.full((len(orders), n_atm), np.nan)
+    for idx, o in enumerate(orders):
+        par3_atm = setups[o]['par3'].atm
+        for i in range(min(len(par3_atm), n_atm)):
+            if shared_atm[i][1] != 0:  # only for free params
+                atm_values[idx, i] = float(par3_atm[i])
+
+    for i in range(n_atm):
+        if shared_atm[i][1] != 0:
+            vals = atm_values[:, i]
+            vals = vals[np.isfinite(vals) & (vals > 0)]
+            if len(vals):
+                shared_atm[i] = (float(np.median(vals)), np.inf)
+
+    combined.atm = shared_atm
+
+    for o in orders:
+        s = setups[o]
+        par_o = s['par']
+        combined['norm_o%d' % o] = par_o.norm
+        combined['wave_o%d' % o] = par_o.wave
+        combined['ip_o%d' % o] = par_o.ip
+        combined['bkg_o%d' % o] = par_o.bkg if 'bkg' in par_o else [0]
+
+    # Prepare wave params (reset to parguess, apply fixes)
+    fixed_fn = lambda x: [(pk, 0) for pk in x]
+    for o in orders:
+        s = setups[o]
+        combined['wave_o%d' % o] = s['parguess'].wave
+        if 'wave' in fix:
+            combined['wave_o%d' % o] = fixed_fn(s['parguess'].wave)
+        if ipB:
+            combined['bkg_o%d' % o] = [(0, 0)]
+        if deg_bkg:
+            combined['bkg_o%d' % o] = [0]
+
+    # Concatenate data across orders
+    pixel_cat = np.concatenate([setups[o]['pixel_ok'] for o in orders])
+    spec_cat = np.concatenate([setups[o]['spec_obs_ok'] for o in orders])
+    sig_cat = np.concatenate([setups[o]['sig'][setups[o]['i_ok']] for o in orders])
+    boundaries = np.cumsum([0] + [len(setups[o]['pixel_ok']) for o in orders])
+
+    # Collect models
+    models = {o: setups[o]['S_mod'] for o in orders}
+
+    # Joint fit with sparse Jacobian
+    par_fit, cov = _run_least_squares(combined, orders, models, boundaries,
+                                      pixel_cat, spec_cat, sig_cat)
+
+    # Post-clip with kapsig[-1] per order, then refit if needed
+    any_clipped = False
+    if kapsig[-1]:
+        for idx, o in enumerate(orders):
+            s = setups[o]
+            opar = _order_par(par_fit, o)
+            smod_full = models[o](s['pixel'], **opar)
+            resid = s['spec_obs'] - smod_full
+            resid[s['flag_obs'] != 0] = np.nan
+            nr_k1 = np.count_nonzero(s['flag_obs'])
+            s['flag_obs'][abs(resid) >= kapsig[-1] * local_sigma(resid)] |= flag.clip
+            nr_k2 = np.count_nonzero(s['flag_obs'])
+            if nr_k1 != nr_k2:
+                any_clipped = True
+                s['i_ok'] = np.where(s['flag_obs'] == 0)[0]
+                s['pixel_ok'] = s['pixel'][s['i_ok']]
+                s['wave_obs_ok'] = s['wave_obs'][s['i_ok']]
+                s['spec_obs_ok'] = s['spec_obs'][s['i_ok']]
+
+        if any_clipped:
+            # Rebuild concatenated arrays and refit
+            pixel_cat = np.concatenate([setups[o]['pixel_ok'] for o in orders])
+            spec_cat = np.concatenate([setups[o]['spec_obs_ok'] for o in orders])
+            sig_cat = np.concatenate([setups[o]['sig'][setups[o]['i_ok']] for o in orders])
+            boundaries = np.cumsum([0] + [len(setups[o]['pixel_ok']) for o in orders])
+
+            # Refit using par3 seeds (pre-main-fit params) with shared atm
+            combined2 = Params()
+            combined2.rv = s0['par3'].rv
+            combined2.atm = shared_atm
+            for o in orders:
+                s = setups[o]
+                par3_o = s['par3']
+                combined2['norm_o%d' % o] = par3_o.norm
+                combined2['wave_o%d' % o] = s['parguess'].wave
+                if 'wave' in fix:
+                    combined2['wave_o%d' % o] = fixed_fn(s['parguess'].wave)
+                combined2['ip_o%d' % o] = par3_o.ip
+                combined2['bkg_o%d' % o] = par3_o.bkg if 'bkg' in par3_o else [0]
+                if ipB:
+                    combined2['bkg_o%d' % o] = [(0, 0)]
+                if deg_bkg:
+                    combined2['bkg_o%d' % o] = [0]
+
+            par_fit, cov = _run_least_squares(combined2, orders, models,
+                                              boundaries, pixel_cat,
+                                              spec_cat, sig_cat)
+
+    return par_fit, cov
 
 
 obsnames = np.array(sorted(glob.glob(obspath)))[nset]
@@ -951,36 +1241,169 @@ for n, obsname in enumerate(obsnames):
     filename = os.path.basename(obsname)
     print(f"{n+1:3d}/{N}", filename)
     rv_prev_order = None
-    for i_o, o in enumerate(orders):
-        for ch in np.arange(chunks):
+
+    if global_atm and chunks == 1:
+        # Phase 1: Setup all orders
+        setups = {}
+        for o in orders:
             try:
-                fig1 = plt.figure(1)
-                fig1._rv2title = '%s (n=%s, o=%s)' % (filename, n+1, o)
-
-                rv[i_o*chunks+ch], e_rv[i_o*chunks+ch], bjd, berv, params, e_params, prms = fit_chunk(o, ch, obsname=obsname, rv_prev=rv_prev_order)
-
-                if np.isfinite(e_rv[i_o*chunks+ch]) and e_rv[i_o*chunks+ch] < 100:
-                    rv_prev_order = rv[i_o*chunks+ch] / 1000  # m/s → km/s
-                print(n+1, o, ch, rv[i_o*chunks+ch], e_rv[i_o*chunks+ch])
-                if 'ipB' in params: params.pop('ipB')
-                if not deg_bkg: params.pop('bkg', None)
-                params.rv.value *= 1000.
-                params.rv.unc *= 1000.
-
-                if headrow:
-                    headrow = False
-                    colnames = ["".join(map(str,x)) for x in params.flat().keys()]
-                    print('BJD n order chunk', *map("{0} e_{0}".format, colnames), 'prms', file=parunit)
-
-                flat_params = [f"{d.value} {d.unc}" for d in params.flat().values()]
-                print(bjd, n+1, o, ch, *flat_params, prms, file=parunit)
-                os.system('mkdir -p res; touch res.dat')
-                os.system('mv res.dat res/%03d_%03d.dat' % (n, o))
-
+                setups[o] = setup_chunk(o, 0, obsname)
             except Exception as e:
                 if repr(e) == 'BdbQuit()':
                     exit()
-                print("Order failed due to:", repr(e))
+                print("Order %d setup failed: %s" % (o, repr(e)))
+
+        if not setups:
+            continue
+
+        # Phase 2: Joint fit
+        setup_orders = list(setups.keys())
+        try:
+            par_fit, cov_fit = fit_multi(setups, setup_orders)
+        except Exception as e:
+            if repr(e) == 'BdbQuit()':
+                exit()
+            print("Global fit failed: %s" % repr(e))
+            continue
+
+        rvo_shared = 1000 * par_fit.rv
+        e_rvo_shared = 1000 * par_fit.rv.unc
+
+        # Phase 3: Per-order post-processing
+        for i_o, o in enumerate(orders):
+            if o not in setups:
+                continue
+            s = setups[o]
+            opar = _order_par(par_fit, o)
+            pixel = s['pixel']; wave_obs = s['wave_obs']; spec_obs = s['spec_obs']
+            err_obs = s['err_obs']; flag_obs = s['flag_obs']
+            bjd = s['bjd']; berv = s['berv']
+            i_ok = s['i_ok']; pixel_ok = s['pixel_ok']
+            wave_obs_ok = s['wave_obs_ok']; spec_obs_ok = s['spec_obs_ok']
+            S_mod_o = s['S_mod']; S_star_o = s['S_star']; IP_func_o = s['IP_func']
+            specs_molec_o = s['specs_molec']; lnwave_j_o = s['lnwave_j']
+            xcen_o = s['xcen']; modset_o = s['modset']
+
+            rv[i_o] = rvo_shared
+            e_rv[i_o] = e_rvo_shared
+
+            show = plot > 0
+            if show:
+                fig1 = plt.figure(1)
+                fig1.clf()
+                fig1._rv2title = '%s (n=%s, o=%s)' % (filename, n+1, o)
+                S_mod_o.show(opar, pixel_ok, spec_obs_ok, par_rv=opar.rv,
+                             dx=0.1, res=(not createtpl), rel_fac=createtpl*1)
+
+            # createtpl processing
+            if createtpl:
+                if tplname:
+                    S_star_ct = lambda x: 0*x + 1
+                    S_mod_ct = model(S_star_ct, lnwave_j_o, specs_molec_o, IP_func_o, **modset_o)
+                else:
+                    S_mod_ct = S_mod_o
+
+                gas_model = np.nan * np.empty_like(pixel)
+                gas_model[iset] = S_mod_ct(pixel[iset], **opar)
+                gas_model /= np.nanmedian(gas_model[iset])
+
+                bad = (gas_model < 0.2) | np.isnan(gas_model)
+                gas_model[bad] = np.nan
+                spec_cor = spec_obs / gas_model
+                err_cor = err_obs / gas_model
+
+                spec_cor[spec_cor<0.01] = np.nan
+
+                if tpl_wave in ('initial', 'berv'):
+                    wave_model = wave_obs + 0
+                elif tpl_wave in ('tell'):
+                    wave_model = np.poly1d(opar.wave[::-1])(pixel-xcen_o)
+                bervt = berv + 0
+                if tpl_wave in ('initial'):
+                    bervt = 0
+
+                spec_cor = np.interp(wave_model, wave_model*(1+bervt/c)/(1+opar.rv/c*int(not tpl_noRV)), spec_cor/np.nanmedian(spec_cor))
+                spec_cor /= np.nanmedian(spec_cor)
+
+                weight = gas_model / (err_cor/np.nanmedian(spec_cor))**2
+                weight = np.interp(wave_model, wave_model*(1+bervt/c)/(1+opar.rv/c*int(not tpl_noRV)), weight)
+
+                spec_all[o, 0][n] = wave_model
+                spec_all[o, 1][n] = spec_cor
+                spec_all[o, 2][n] = weight
+
+            # Output
+            if show:
+                fig = plt.figure(1)
+                if fig.axes:
+                    fig.axes[0].plot(wave_obs[flag_obs != 0], spec_obs[flag_obs != 0], 'x', ms=3, color='gray', label='flagged')
+                    fig.axes[0].legend(loc='upper right', fontsize='small')
+                    plt.pause(0.01)
+                if plot == 1:
+                    input('Press Enter to continue...')
+
+            fmod = S_mod_o(pixel_ok, **opar)
+            res = spec_obs_ok - fmod
+            prms = np.nanstd(res) / np.nanmean(fmod) * 100
+            np.savetxt('res.dat', list(zip(pixel_ok, res)), fmt="%s")
+
+            print(n+1, o, 0, rv[i_o], e_rv[i_o])
+
+            # Build per-order params for .par.dat output
+            params = Params(opar)
+            if 'ipB' in params: params.pop('ipB')
+            if not deg_bkg: params.pop('bkg', None)
+            params.rv.value *= 1000.
+            params.rv.unc *= 1000.
+
+            if headrow:
+                headrow = False
+                colnames = ["".join(map(str,x)) for x in params.flat().keys()]
+                print('BJD n order chunk', *map("{0} e_{0}".format, colnames), 'prms', file=parunit)
+
+            flat_params = [f"{d.value} {d.unc}" for d in params.flat().values()]
+            print(bjd, n+1, o, 0, *flat_params, prms, file=parunit)
+            os.system('mkdir -p res; touch res.dat')
+            os.system('mv res.dat res/%03d_%03d.dat' % (n, o))
+
+            if plot > 0:
+                plt.figure(1).savefig('%s_n%03d_o%03d.png' % (tag, n, o), dpi=150)
+
+    else:
+        # Existing per-order loop
+        for i_o, o in enumerate(orders):
+            for ch in np.arange(chunks):
+                try:
+                    fig1 = plt.figure(1)
+                    fig1._rv2title = '%s (n=%s, o=%s)' % (filename, n+1, o)
+
+                    rv[i_o*chunks+ch], e_rv[i_o*chunks+ch], bjd, berv, params, e_params, prms = fit_chunk(o, ch, obsname=obsname, rv_prev=rv_prev_order)
+
+                    if np.isfinite(e_rv[i_o*chunks+ch]) and e_rv[i_o*chunks+ch] < 100:
+                        rv_prev_order = rv[i_o*chunks+ch] / 1000  # m/s → km/s
+                    print(n+1, o, ch, rv[i_o*chunks+ch], e_rv[i_o*chunks+ch])
+                    if 'ipB' in params: params.pop('ipB')
+                    if not deg_bkg: params.pop('bkg', None)
+                    params.rv.value *= 1000.
+                    params.rv.unc *= 1000.
+
+                    if headrow:
+                        headrow = False
+                        colnames = ["".join(map(str,x)) for x in params.flat().keys()]
+                        print('BJD n order chunk', *map("{0} e_{0}".format, colnames), 'prms', file=parunit)
+
+                    flat_params = [f"{d.value} {d.unc}" for d in params.flat().values()]
+                    print(bjd, n+1, o, ch, *flat_params, prms, file=parunit)
+                    os.system('mkdir -p res; touch res.dat')
+                    os.system('mv res.dat res/%03d_%03d.dat' % (n, o))
+
+                    if plot > 0:
+                        plt.figure(1).savefig('%s_n%03d_o%03d.png' % (tag, n, o), dpi=150)
+
+                except Exception as e:
+                    if repr(e) == 'BdbQuit()':
+                        exit()
+                    print("Order failed due to:", repr(e))
 
     if not np.isnan(rv).all():
         oo = np.isfinite(e_rv) & (e_rv > 0)
@@ -1053,6 +1476,7 @@ if createtpl:
             ax.legend(loc='upper right', fontsize='small')
             fig2.tight_layout()
             plt.pause(0.01)
+            fig2.savefig('%s_tpl_o%03d.png' % (tag, order), dpi=150)
             if plot == 1:
                 input('Press Enter to continue...')
 
