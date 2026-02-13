@@ -979,6 +979,17 @@ def _run_least_squares(combined, orders, models, boundaries,
 
     sparsity = _build_sparsity(varykeys, orders, boundaries, n_data)
 
+    # Bounds: atm coefficients >= 0 (physical: no negative absorption)
+    lower = np.full_like(varyvals, -np.inf)
+    upper = np.full_like(varyvals, np.inf)
+    for j, key in enumerate(varykeys):
+        name = str(key[0]) if isinstance(key, tuple) else str(key)
+        if name == 'atm':
+            lower[j] = 0.0
+            # Ensure starting value is within bounds
+            if varyvals[j] < 0:
+                varyvals[j] = abs(varyvals[j])
+
     def residual_func(params):
         par_now = combined + dict(zip(varykeys, params))
         out = np.empty(n_data)
@@ -989,7 +1000,7 @@ def _run_least_squares(combined, orders, models, boundaries,
         return out
 
     result = least_squares(residual_func, varyvals, jac_sparsity=sparsity,
-                           method='trf', x_scale='jac')
+                           bounds=(lower, upper), method='trf', x_scale='jac')
 
     par_fit = combined + dict(zip(varykeys, result.x))
 
@@ -1072,7 +1083,23 @@ def fit_multi(setups, orders):
     # Collect models
     models = {o: setups[o]['S_mod'] for o in orders}
 
-    # Joint fit with sparse Jacobian
+    # Step 1: Fit only shared rv+atm with per-order params frozen
+    combined_atm = Params(combined)
+    for o in orders:
+        combined_atm['norm_o%d' % o] = fixed_fn(combined['norm_o%d' % o])
+        combined_atm['wave_o%d' % o] = fixed_fn(combined['wave_o%d' % o])
+        combined_atm['ip_o%d' % o] = fixed_fn(combined['ip_o%d' % o])
+        combined_atm['bkg_o%d' % o] = fixed_fn(combined['bkg_o%d' % o])
+
+    par_atm_fit, _ = _run_least_squares(combined_atm, orders, models,
+                                        boundaries, pixel_cat, spec_cat,
+                                        sig_cat)
+
+    # Transfer fitted atm into full combined params for step 2
+    combined.rv = par_atm_fit.rv
+    combined.atm = par_atm_fit.atm
+
+    # Step 2: Full joint fit with sparse Jacobian
     par_fit, cov = _run_least_squares(combined, orders, models, boundaries,
                                       pixel_cat, spec_cat, sig_cat)
 
