@@ -10,19 +10,27 @@ Author: Alexis Lavail (with help from Claude)
 - Python >= 3.10
 - astropy, matplotlib, numpy, scipy
 
+## Installation
+
+Install as a global command with [uv](https://docs.astral.sh/uv/):
+```bash
+uv tool install -e /path/to/vipere
+```
+
+The `-e` (editable) flag means changes to `vipere.py` take effect immediately without reinstalling.
+You can then run `vipere` from anywhere on your system.
+
 ## Usage
 
-Run directly with [uv](https://docs.astral.sh/uv/):
 ```bash
-uv run vipere.py "data/WASP18/cr2res*.fits" \
+vipere "data/WASP18/cr2res*.fits" \
   -createtpl -telluric add -tsig 10 -tpl_wave tell \
   -deg_norm 2 -deg_wave 2 -oset 1:28 -o data/WASP18/tpl1
 ```
 
-Or install and run:
+Alternatively, run directly without installing:
 ```bash
-uv pip install -e .
-vipere "data/WASP18/cr2res*.fits" -createtpl -telluric add -oset 1:28 -o output
+uv run vipere.py "data/WASP18/cr2res*.fits" -createtpl -telluric add -oset 1:28 -o output
 ```
 
 See `vipere -?` for all options.
