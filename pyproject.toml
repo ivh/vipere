@@ -37,7 +37,7 @@ vipere = "vipere:run"
 doc = ["sphinx"]
 
 [tool.setuptools]
-py-modules = ["vipere"]
+packages = ["vipere"]
 
 [tool.setuptools.package-data]
-vipere = ["lib/**"]
+vipere = ["config_vipere.yaml", "lib/**"]
