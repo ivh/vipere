@@ -566,8 +566,11 @@ if __name__ == "__main__" or __name__ == "vipere":
 
     # read in default values from config_vipere.yaml
     import yaml
-    with open(viperdir+'config_vipere.yaml') as f:
-        configs_def = {k: str(v) for k, v in yaml.safe_load(f).items()}
+    configs_def = {}
+    config_path = viperdir+'config_vipere.yaml'
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            configs_def = {k: str(v) for k, v in yaml.safe_load(f).items()}
 
     configs_user = {}
     if preargs.config_file:
