@@ -571,7 +571,7 @@ if __name__ == "__main__" or __name__ == "vipere":
 
     configs_user = {}
     if preargs.config_file:
-        with open(preargs.config_file[0]) as f:
+        with open(preargs.config_file) as f:
             configs_user = {k: str(v) for k, v in yaml.safe_load(f).items()}
 
     parser = argparse.ArgumentParser(description='vipere - Telluric correction for CRIRES+ spectra', add_help=False, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -1199,8 +1199,8 @@ if flagfile:
 
 #### Telluric model ####
 if 'add' in telluric:
-    bands_all = ['vis', 'J', 'H', 'K']
-    wave_band = [0, 9000, 14000, 18500]
+    bands_all = ['vis', 'J', 'H', 'K', 'L', 'M']
+    wave_band = [0, 9000, 14000, 18500, 28000, 40000]
 
     w0 = obs_lmin - wave_band
     w1 = obs_lmax - wave_band
