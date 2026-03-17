@@ -661,6 +661,7 @@ def setup_chunk(order, chunk, obsname, rv_prev=None):
     p17, smod, p83 = np.percentile(spec_obs[flag_obs==0], [17, 50, 83])
     sig = (p83 - p17) / 2
     flag_obs[spec_obs > smod+kap*sig] |= flag.clip
+    flag_obs[spec_obs < smod-kap*sig] |= flag.clip
 
     i_ok = np.where(flag_obs==0)[0]
     pixel_ok = pixel[i_ok]
